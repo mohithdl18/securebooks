@@ -137,3 +137,16 @@ export function buildInvoicesPdf(bookings, days) {
   });
 }
 
+
+/** One booking → one-page invoice PDF (used as the email attachment). */
+export function buildSingleInvoicePdf(booking) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 50, info: { Title: `Invoice ${booking.bookingId}` } });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    drawInvoice(doc, booking);
+    doc.end();
+  });
+}

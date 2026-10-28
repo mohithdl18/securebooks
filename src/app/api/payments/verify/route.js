@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import {
   jsonError,
   jsonOk,
@@ -14,6 +15,7 @@ import {
   PAYMENT_ID_RE,
 } from "@/lib/razorpay";
 import { finalizePayment } from "@/lib/finalizeBooking";
+import { sendBookingConfirmation } from "@/lib/email";
 
 /**
  * Called by the browser after Razorpay Checkout succeeds.
@@ -55,6 +57,9 @@ export async function POST(request) {
 
     switch (result.state) {
       case "confirmed":
+        // Email goes out after this response, so the confirmation page
+        // shows immediately. Safe to trigger twice — sent once only.
+        after(() => sendBookingConfirmation(result.bookingId).catch(() => {}));
         return jsonOk({
           success: true,
           bookingId: result.bookingId,

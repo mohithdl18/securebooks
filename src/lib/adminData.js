@@ -69,6 +69,9 @@ export function toDetails(b, paymentOrder = null) {
       refunds: paymentOrder?.refunds || null,
     },
     termsAcceptedAt: b.terms_accepted_at || null,
+    email: b.email
+      ? { status: b.email.status, sentAt: b.email.sent_at || null, to: b.email.to || "", error: b.email.error || "" }
+      : null,
     cancelledAt: b.cancelled_at || null,
     cancelReason: b.cancel_reason || "",
   };

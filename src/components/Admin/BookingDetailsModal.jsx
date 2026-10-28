@@ -27,6 +27,17 @@ function Card({ title, children }) {
 
 export default function BookingDetailsModal({ bookingId, onClose, onRequestCancel }) {
   const [result, setResult] = useState({ id: null, booking: null, error: "" });
+  const [emailMsg, setEmailMsg] = useState({ id: null, text: "", busy: false });
+
+  async function resendEmail(id) {
+    setEmailMsg({ id, text: "", busy: true });
+    try {
+      const d = await adminFetch(`/api/admin/bookings/${encodeURIComponent(id)}/email`, { method: "POST" });
+      setEmailMsg({ id, text: d.message || "Email sent.", busy: false });
+    } catch (e) {
+      setEmailMsg({ id, text: e.message, busy: false });
+    }
+  }
 
   useEffect(() => {
     if (!bookingId) return;
@@ -54,6 +65,16 @@ export default function BookingDetailsModal({ bookingId, onClose, onRequestCance
       footer={
         booking && (
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            {booking.status === "confirmed" && (
+              <button
+                type="button"
+                disabled={emailMsg.busy}
+                onClick={() => resendEmail(booking.bookingId)}
+                className="rounded-xl border border-[#052a50]/20 bg-white px-5 py-3 text-sm font-semibold text-[#052a50] hover:bg-[#052a50]/5 disabled:opacity-50"
+              >
+                {emailMsg.busy ? "Sending…" : booking.email?.status === "sent" ? "Send email again" : "Send confirmation email"}
+              </button>
+            )}
             <a
               href={`/admin/invoice?id=${encodeURIComponent(booking.bookingId)}`}
               target="_blank"
@@ -156,6 +177,25 @@ export default function BookingDetailsModal({ bookingId, onClose, onRequestCance
                 </>
               ) : (
                 <Row label="Total paid" value={formatMoney(booking.amount)} />
+              )}
+            </Card>
+
+            <Card title="Confirmation email">
+              <Row
+                label="Status"
+                value={
+                  !booking.email
+                    ? "Not sent"
+                    : booking.email.status === "sent"
+                      ? `Sent ${formatDateTime(booking.email.sentAt)}`
+                      : booking.email.status === "failed"
+                        ? `Failed — ${booking.email.error || "unknown error"}`
+                        : "Sending…"
+                }
+              />
+              {booking.email?.to && <Row label="To" value={booking.email.to} />}
+              {emailMsg.id === booking.bookingId && emailMsg.text && (
+                <p className="mt-2 text-sm font-medium text-[#b08a28]">{emailMsg.text}</p>
               )}
             </Card>
 

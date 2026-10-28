@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { verifyWebhookSignature, ORDER_ID_RE, PAYMENT_ID_RE } from "@/lib/razorpay";
 import { finalizePayment } from "@/lib/finalizeBooking";
+import { sendBookingConfirmation } from "@/lib/email";
 
 /**
  * Razorpay → server webhook. Configure in Dashboard → Webhooks with
@@ -63,6 +64,10 @@ export async function POST(request) {
     ) {
       const result = await finalizePayment({ orderId, paymentId });
       if (result.state === "pending") throw new Error("PAYMENT_STILL_PENDING");
+      // Covers guests who closed the tab before the confirmation page.
+      if (result.state === "confirmed") {
+        after(() => sendBookingConfirmation(result.bookingId).catch(() => {}));
+      }
     } else if (type === "payment.failed" && ORDER_ID_RE.test(orderId || "")) {
       await db.collection("payment_orders").updateOne(
         { razorpay_order_id: orderId, status: { $in: ["created", "verification_pending"] } },
