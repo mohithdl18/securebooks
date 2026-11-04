@@ -63,6 +63,7 @@ function Counter({ value, onChange, label }) {
 
 export default function Addons({
   nights = 1,
+  defaultMealGuests = 2,
   value,
   onChange,
   onBack,
@@ -76,7 +77,7 @@ export default function Addons({
 
   const addons = value || {
     mealPlan: "",
-    mealGuests: 2,
+    mealGuests: defaultMealGuests,
     drivers: 0,
     driverMealPlan: "",
   };
@@ -205,7 +206,14 @@ export default function Addons({
                     name="guest-meal-plan"
                     value={meal.id}
                     checked={selected}
-                    onChange={() => update({ mealPlan: meal.id })}
+                    onChange={() =>
+                      // First pick starts at everyone staying; switching
+                      // plans keeps the count the guest already chose.
+                      update({
+                        mealPlan: meal.id,
+                        mealGuests: addons.mealPlan ? guestCount : defaultMealGuests,
+                      })
+                    }
                     className="h-4 w-4 accent-[#052a50]"
                   />
 
@@ -240,7 +248,12 @@ export default function Addons({
                     <Counter
                       value={guestCount}
                       onChange={(count) =>
-                        update({ mealGuests: Math.max(1, count) })
+                        update({
+                          mealGuests: Math.min(
+                            Math.max(50, defaultMealGuests),
+                            Math.max(1, count)
+                          ),
+                        })
                       }
                       label="meal guest"
                     />

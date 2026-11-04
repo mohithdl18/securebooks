@@ -7,7 +7,7 @@ import RoomsCard from "@/components/Bookings/RoomsCard";
 import PackagesCard from "@/components/Bookings/PackagesCard";
 import Cart from "@/components/Bookings/Cart";
 import OffersButton from "@/components/Bookings/OffersButton";
-import { getAvailablePackages } from "@/logic/packageAvailability";
+import { ALL_PACKAGES } from "@/logic/packageAvailability";
 import {
   initializeTempID,
   updateBookingDates,
@@ -56,6 +56,9 @@ export default function BookingsPage() {
   const [selectedRoomIds, setSelectedRoomIds] = useState([]);
   const [selectedRoomData, setSelectedRoomData] = useState([]);
   const [selectedPackageIds, setSelectedPackageIds] = useState([]);
+  // The chosen package with its extra-guest counts (one package at a time).
+  const [selectedPackageData, setSelectedPackageData] = useState(null);
+  const [isHoldingPackage, setIsHoldingPackage] = useState(false);
 
   const [availableRoomIds, setAvailableRoomIds] = useState(null);
   const [isCheckingAvailability, setIsCheckingAvailability] =
@@ -73,6 +76,7 @@ export default function BookingsPage() {
   const requestIdRef = useRef(0);
   const tempIDRef = useRef(null);
   const selectedRoomIdsRef = useRef([]);
+  const selectedPackageIdsRef = useRef([]);
   const holdExpiriesRef = useRef({});
   const datesRef = useRef(dates);
   const isMountedRef = useRef(false);
@@ -90,6 +94,10 @@ export default function BookingsPage() {
   useEffect(() => {
     selectedRoomIdsRef.current = selectedRoomIds;
   }, [selectedRoomIds]);
+
+  useEffect(() => {
+    selectedPackageIdsRef.current = selectedPackageIds;
+  }, [selectedPackageIds]);
 
   useEffect(() => {
     holdExpiriesRef.current = holdExpiries;
@@ -209,6 +217,7 @@ export default function BookingsPage() {
         setSelectedRoomIds([]);
         setSelectedRoomData([]);
         setSelectedPackageIds([]);
+        setSelectedPackageData(null);
         selectedRoomIdsRef.current = [];
       }
 
@@ -326,9 +335,15 @@ export default function BookingsPage() {
 
       if (cancelled || !isMountedRef.current) return;
 
+      const hadPackage = selectedPackageIdsRef.current.length > 0;
+
       setSelectedRoomIds([]);
       setSelectedRoomData([]);
       selectedRoomIdsRef.current = [];
+
+      setSelectedPackageIds([]);
+      setSelectedPackageData(null);
+      selectedPackageIdsRef.current = [];
 
       setHoldExpiries({});
       holdExpiriesRef.current = {};
@@ -337,7 +352,9 @@ export default function BookingsPage() {
       clearHoldExpiry();
 
       setHoldError(
-        "Your 10-minute room hold has expired. Please select your room again."
+        hadPackage
+          ? "Your 10-minute package hold has expired. Please select the package again."
+          : "Your 10-minute room hold has expired. Please select your room again."
       );
     }
 
@@ -406,6 +423,20 @@ export default function BookingsPage() {
     setHoldError("");
 
     try {
+      // A package and individual rooms can't be combined: picking a room
+      // releases the package's holds first.
+      if (selectedPackageIdsRef.current.length > 0) {
+        await releaseTemporaryHolds();
+        if (!isMountedRef.current) return;
+        selectedPackageIdsRef.current = [];
+        setSelectedPackageIds([]);
+        setSelectedPackageData(null);
+        holdExpiriesRef.current = {};
+        setHoldExpiries({});
+        setRemainingHoldTime(0);
+        clearHoldExpiry();
+      }
+
       if (isSelected) {
         await releaseTemporaryHolds(roomId);
 
@@ -429,6 +460,7 @@ export default function BookingsPage() {
         setHoldExpiries(remainingExpiries);
 
         setSelectedPackageIds([]);
+        setSelectedPackageData(null);
 
         selectedRoomIdsRef.current =
           selectedRoomIdsRef.current.filter(
@@ -529,6 +561,7 @@ export default function BookingsPage() {
       );
 
       setSelectedPackageIds([]);
+        setSelectedPackageData(null);
     } catch (error) {
       console.error("Room selection failed:", error);
 
@@ -564,26 +597,108 @@ export default function BookingsPage() {
     );
   }
 
+  // Select or deselect a whole-villa package. Every room in the package
+  // is held on the server (same 10-minute holds as single rooms); if any
+  // one can't be held, nothing is kept.
   async function handlePackageSelection(pkg) {
-    if (selectedRoomIdsRef.current.length > 0) {
-      await releaseTemporaryHolds();
+    if (!pkg?.id) return;
+
+    if (!datesRef.current.checkIn || !datesRef.current.checkOut) {
+      setHoldError("Please choose your check-in and check-out dates first.");
+      return;
     }
 
-    setSelectedPackageIds((previous) =>
-      previous.includes(pkg.id)
-        ? previous.filter((id) => id !== pkg.id)
-        : [...previous, pkg.id]
-    );
+    if (isHoldingPackage) return;
 
-    setSelectedRoomIds([]);
-    setSelectedRoomData([]);
-    selectedRoomIdsRef.current = [];
+    const alreadySelected = selectedPackageIdsRef.current.includes(pkg.id);
 
-    setHoldExpiries({});
-    holdExpiriesRef.current = {};
+    setIsHoldingPackage(true);
+    setHoldError("");
 
-    setRemainingHoldTime(0);
-    clearHoldExpiry();
+    try {
+      // Release whatever is currently held (rooms or another package).
+      if (
+        Object.keys(holdExpiriesRef.current).length > 0 ||
+        selectedRoomIdsRef.current.length > 0 ||
+        selectedPackageIdsRef.current.length > 0
+      ) {
+        await releaseTemporaryHolds();
+      }
+
+      if (!isMountedRef.current) return;
+
+      setSelectedRoomIds([]);
+      setSelectedRoomData([]);
+      selectedRoomIdsRef.current = [];
+      setSelectedPackageIds([]);
+      setSelectedPackageData(null);
+      selectedPackageIdsRef.current = [];
+      setHoldExpiries({});
+      holdExpiriesRef.current = {};
+      setRemainingHoldTime(0);
+      clearHoldExpiry();
+
+      // Clicking the selected package again just deselects it.
+      if (alreadySelected) return;
+
+      const tempID = tempIDRef.current || initializeTempID();
+      const expiries = {};
+
+      for (const roomId of pkg.roomIds) {
+        const response = await fetch("/api/Bookings/TempBooks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            TempID: tempID,
+            roomId,
+            checkIn: datesRef.current.checkIn,
+            checkOut: datesRef.current.checkOut,
+          }),
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok || !result.success) {
+          await releaseTemporaryHolds();
+          throw new Error(
+            response.status === 409
+              ? `${pkg.name} is no longer available — one of its rooms was just booked or is being booked by another guest. Please try again in a few minutes or choose individual rooms.`
+              : result.message || "Unable to hold this package. Please try again."
+          );
+        }
+
+        const expiresAt = result.expiresAt
+          ? new Date(result.expiresAt).getTime()
+          : Date.now() + TEMP_HOLD_DURATION_MS;
+        expiries[roomId] = Number.isFinite(expiresAt)
+          ? expiresAt
+          : Date.now() + TEMP_HOLD_DURATION_MS;
+      }
+
+      if (!isMountedRef.current) return;
+
+      holdExpiriesRef.current = expiries;
+      setHoldExpiries(expiries);
+      startTemporaryHold(Math.min(...Object.values(expiries)));
+
+      selectedPackageIdsRef.current = [pkg.id];
+      setSelectedPackageIds([pkg.id]);
+      setSelectedPackageData(pkg);
+    } catch (error) {
+      console.error("Package selection failed:", error);
+      if (isMountedRef.current) {
+        setHoldError(error.message || "Unable to hold this package. Please try again.");
+      }
+    } finally {
+      if (isMountedRef.current) setIsHoldingPackage(false);
+    }
+  }
+
+  function handlePackageOccupancyChange(updatedPackage) {
+    if (!updatedPackage || !selectedPackageIdsRef.current.includes(updatedPackage.id)) {
+      return;
+    }
+    setSelectedPackageData(updatedPackage);
   }
 
   async function handleClearCart() {
@@ -592,6 +707,7 @@ export default function BookingsPage() {
     setSelectedRoomIds([]);
     setSelectedRoomData([]);
     setSelectedPackageIds([]);
+        setSelectedPackageData(null);
 
     selectedRoomIdsRef.current = [];
     setHoldExpiries({});
@@ -627,8 +743,6 @@ export default function BookingsPage() {
     dates.checkOut
   );
 
-  const availablePackages =
-    getAvailablePackages(availableRoomIds);
 
   return (
     <main
@@ -782,6 +896,8 @@ export default function BookingsPage() {
                   onOccupancyChange={handleRoomOccupancyChange}
                   nights={nights}
                   availableRoomIds={availableRoomIds}
+                  checkIn={dates.checkIn}
+                  checkOut={dates.checkOut}
                 />
               )}
             </>
@@ -793,8 +909,8 @@ export default function BookingsPage() {
                 </h2>
 
                 <p className="mt-1 text-sm opacity-70">
-                  Packages are shown only when all rooms included in a
-                  package are available for your selected dates.
+                  Book the whole villa. A package is available only when
+                  every room in it is free for your selected dates.
                 </p>
 
                 {dates.checkIn && dates.checkOut && (
@@ -803,7 +919,33 @@ export default function BookingsPage() {
                     {nights === 1 ? "night" : "nights"}
                   </p>
                 )}
+
+                {selectedPackageIds.length > 0 && remainingHoldTime > 0 && (
+                  <p role="timer" className="mt-2 text-sm font-medium">
+                    Package held · Time remaining:{" "}
+                    {formatCountdown(remainingHoldTime)}
+                  </p>
+                )}
               </div>
+
+              {holdError && (
+                <div
+                  className="mb-4 rounded-xl border p-4 text-sm"
+                  style={{
+                    backgroundColor: "#ffffff",
+                    borderColor: "rgba(179, 67, 37, 0.3)",
+                  }}
+                  role="alert"
+                >
+                  {holdError}
+                </div>
+              )}
+
+              {isHoldingPackage && (
+                <p className="mb-4 text-sm opacity-70" role="status">
+                  Holding all rooms in this package...
+                </p>
+              )}
 
               {isCheckingAvailability ? (
                 <div
@@ -855,30 +997,17 @@ export default function BookingsPage() {
                   Checking availability is required before packages
                   can be displayed.
                 </div>
-              ) : availablePackages.length === 0 ? (
-                <div
-                  className="rounded-2xl border p-8 text-center"
-                  style={{
-                    backgroundColor: "#ffffff",
-                    borderColor: "rgba(5, 42, 80, 0.12)",
-                  }}
-                >
-                  <h3 className="text-xl font-semibold">
-                    No packages available
-                  </h3>
-
-                  <p className="mt-2 text-sm opacity-70">
-                    The rooms required for these packages are not all
-                    available for your selected dates. Try different dates
-                    or view individual rooms.
-                  </p>
-                </div>
               ) : (
                 <PackagesCard
-                  packages={availablePackages}
+                  packages={ALL_PACKAGES}
+                  availableRoomIds={availableRoomIds}
                   selectedPackageIds={selectedPackageIds}
                   onSelectPackage={handlePackageSelection}
+                  onOccupancyChange={handlePackageOccupancyChange}
                   nights={nights}
+                  checkIn={dates.checkIn}
+                  checkOut={dates.checkOut}
+                  isBusy={isHoldingPackage}
                 />
               )}
             </>
@@ -893,6 +1022,7 @@ export default function BookingsPage() {
         selectedRoomIds={selectedRoomIds}
         selectedRoomData={selectedRoomData}
         selectedPackageIds={selectedPackageIds}
+        selectedPackageData={selectedPackageData}
         availableRoomIds={availableRoomIds}
         nights={nights}
         onClear={handleClearCart}

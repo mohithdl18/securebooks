@@ -14,7 +14,7 @@ import {
   RequestError,
 } from "@/lib/security";
 import { validateStay, validateCustomerDetails } from "@/lib/validation";
-import { quoteBooking } from "@/lib/pricing";
+import { quoteBooking, resolvePackage } from "@/lib/pricing";
 import { resolvePromo } from "@/lib/promos";
 import { razorpayConfigured, razorpayRequest, publicKeyId } from "@/lib/razorpay";
 
@@ -29,7 +29,11 @@ export async function POST(request) {
     if (blocked) return blocked;
 
     const body = await readJsonBody(request, 8 * 1024);
-    const { checkIn, checkOut, roomSelections, addons = {}, details, promoCode } = body;
+    const { checkIn, checkOut, addons = {}, details, promoCode } = body;
+    // A booking is EITHER individual rooms OR one whole-villa package.
+    const packageSelection =
+      body.packageSelection && typeof body.packageSelection === "object" ? body.packageSelection : null;
+    const roomSelections = packageSelection ? null : body.roomSelections;
 
     const sid = readSession(request);
     if (!sid) return jsonError("Your session has expired. Please select your rooms again.", 401);
@@ -37,10 +41,15 @@ export async function POST(request) {
 
     const stayDates = validateStay(checkIn, checkOut);
 
-    if (!Array.isArray(roomSelections) || roomSelections.length < 1 || roomSelections.length > rooms.length) {
-      return jsonError("Select at least one room.");
+    let roomIds;
+    if (packageSelection) {
+      roomIds = [...resolvePackage(packageSelection).roomIds];
+    } else {
+      if (!Array.isArray(roomSelections) || roomSelections.length < 1 || roomSelections.length > rooms.length) {
+        return jsonError("Select at least one room.");
+      }
+      roomIds = roomSelections.map((r) => r?.roomId);
     }
-    const roomIds = roomSelections.map((r) => r?.roomId);
     if (
       new Set(roomIds).size !== roomIds.length ||
       roomIds.some((id) => typeof id !== "string" || !rooms.some((r) => r.id === id))
@@ -66,7 +75,12 @@ export async function POST(request) {
       .find({ TempID, roomId: { $in: roomIds }, checkIn, checkOut, expiresAt: { $gt: now }, status: "active" })
       .toArray();
     if (holds.length !== roomIds.length || new Set(holds.map((h) => h.roomId)).size !== roomIds.length) {
-      return jsonError("A room hold has expired. Please select your rooms again.", 409);
+      return jsonError(
+        packageSelection
+          ? "Your villa hold has expired. Please select the package again."
+          : "A room hold has expired. Please select your rooms again.",
+        409
+      );
     }
     const holdExpiresAt = Math.min(...holds.map((h) => new Date(h.expiresAt).getTime()));
     if (holdExpiresAt - now.getTime() < MIN_HOLD_REMAINING_MS) {
@@ -81,9 +95,11 @@ export async function POST(request) {
     }
 
     // Price is computed ONLY here, from server-side tables.
-    const preQuote = quoteBooking({ roomSelections, checkIn, checkOut, addons });
+    const preQuote = quoteBooking({ roomSelections, packageSelection, checkIn, checkOut, addons });
     const promo = await resolvePromo(db, promoCode, { subtotal: preQuote.subtotal, customer });
-    const quote = promo ? quoteBooking({ roomSelections, checkIn, checkOut, addons, promo }) : preQuote;
+    const quote = promo
+      ? quoteBooking({ roomSelections, packageSelection, checkIn, checkOut, addons, promo })
+      : preQuote;
 
     // The guest must be charged exactly what the site showed them.
     const expected = Number(body.expectedTotal);

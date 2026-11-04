@@ -5,6 +5,7 @@ import { getBookingDetails } from "@/lib/adminData";
 import { buildSingleInvoicePdf } from "@/lib/invoicePdf";
 import { BUSINESS } from "@/config/business";
 import { PRICES } from "@/config/pricing";
+import { invoiceLines, guestSummary } from "@/config/invoiceLines";
 
 /**
  * Booking confirmation email via Resend.
@@ -21,7 +22,6 @@ import { PRICES } from "@/config/pricing";
  */
 
 const STALE_CLAIM_MS = 10 * 60 * 1000;
-const MEAL_LABEL = { lunch: "Lunch", dinner: "Dinner", lunchDinner: "Lunch + Dinner" };
 
 let warned = false;
 function config() {
@@ -78,27 +78,10 @@ function longDate(v) {
 
 export function buildConfirmationEmail(b) {
   const p = b.pricing || {};
-  const a = p.addons || {};
   const nights = p.nights || b.nights || 1;
   const firstName = (b.guest.name || "").trim().split(/\s+/)[0] || "there";
-  const adults = b.roomLines.reduce((t, r) => t + PRICES.includedGuestsPerRoom + (r.extraAdults || 0), 0);
-  const children = b.roomLines.reduce((t, r) => t + (r.children || 0), 0);
-  const guests = `${adults} adult${adults === 1 ? "" : "s"}${children ? `, ${children} child${children === 1 ? "" : "ren"}` : ""}`;
-
-  const lines = [
-    ...b.roomLines.map((r) => ({
-      label: r.roomName,
-      sub: [
-        `${r.nights} night${r.nights === 1 ? "" : "s"}${r.nightlyRate ? ` × ${money(r.nightlyRate)}` : ""}`,
-        r.extraAdults ? `+${r.extraAdults} extra adult` : "",
-        r.children ? `+${r.children} child` : "",
-      ].filter(Boolean).join(" · "),
-      amount: r.amount,
-    })),
-    a.mealSubtotal > 0 && { label: `Meals — ${MEAL_LABEL[a.mealPlan] || ""}`, sub: `${a.mealGuests} guests × ${nights} nights`, amount: a.mealSubtotal },
-    a.driverAccommodation > 0 && { label: "Driver accommodation", sub: `${a.drivers} × ${nights} nights`, amount: a.driverAccommodation },
-    a.driverMeals > 0 && { label: `Driver meals — ${MEAL_LABEL[a.driverMealPlan] || ""}`, sub: `${a.drivers} × ${nights} nights`, amount: a.driverMeals },
-  ].filter(Boolean);
+  const guests = guestSummary(b, PRICES.includedGuestsPerRoom);
+  const lines = invoiceLines(b, money);
 
   const totals = [
     ["Subtotal", money(p.subtotal)],
@@ -146,7 +129,7 @@ export function buildConfirmationEmail(b) {
       </tr>
       <tr>
         <td style="padding:10px 20px 18px;vertical-align:top;"><span style="color:${MUTED};font-size:12px;">Stay</span><br><strong>${nights} night${nights === 1 ? "" : "s"} · ${esc(guests)}</strong></td>
-        <td style="padding:10px 20px 18px;vertical-align:top;"><span style="color:${MUTED};font-size:12px;">Room${b.rooms.length === 1 ? "" : "s"}</span><br><strong>${b.rooms.map(esc).join(", ")}</strong></td>
+        <td style="padding:10px 20px 18px;vertical-align:top;"><span style="color:${MUTED};font-size:12px;">${b.packageLine ? "Package" : `Room${b.rooms.length === 1 ? "" : "s"}`}</span><br><strong>${b.packageLine ? `${esc(b.packageLine.name)} — ` : ""}${b.rooms.map(esc).join(", ")}</strong></td>
       </tr>
     </table>
   </td></tr>
@@ -208,7 +191,7 @@ export function buildConfirmationEmail(b) {
     `Check-in:  ${longDate(b.checkIn)}`,
     `Check-out: ${longDate(b.checkOut)}`,
     `Stay: ${nights} night(s), ${guests}`,
-    `Rooms: ${b.rooms.join(", ")}`,
+    b.packageLine ? `Package: ${b.packageLine.name} (${b.rooms.join(", ")})` : `Rooms: ${b.rooms.join(", ")}`,
     ``,
     `INVOICE`,
     ...lines.map((l) => `${l.label}${l.sub ? ` (${l.sub})` : ""}: ${money(l.amount)}`),

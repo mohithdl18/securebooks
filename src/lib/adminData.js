@@ -23,6 +23,7 @@ export function toSummary(b) {
     bookingId: b.booking_id,
     name: b.personal_info?.name || "",
     rooms: (b.rooms || []).map((r) => r.roomName || roomName(r.roomId)),
+    packageName: b.pricing?.package?.name || null,
     roomIds: (b.rooms || []).map((r) => r.roomId),
     checkIn: b.check_in || "",
     checkOut: b.check_out || "",
@@ -53,11 +54,30 @@ export function toDetails(b, paymentOrder = null) {
       roomId: r.roomId,
       roomName: r.roomName || roomName(r.roomId),
       nights: r.nights,
+      weekdayNights: r.weekday_nights ?? null,
+      weekendNights: r.weekend_nights ?? null,
       nightlyRate: r.nightly_rate ?? null,
       extraAdults: r.extra_adults || 0,
       children: r.chargeable_children || 0,
       amount: r.amount || 0,
     })),
+    // Whole-villa package bookings carry one priced package line.
+    packageLine: b.pricing?.package
+      ? {
+          packageId: b.pricing.package.packageId,
+          name: b.pricing.package.name,
+          rooms: (b.pricing.package.roomIds || []).map(roomName),
+          nights: b.pricing.package.nights,
+          weekdayNights: b.pricing.package.weekday_nights,
+          weekendNights: b.pricing.package.weekend_nights,
+          pricePerNight: b.pricing.package.price_per_night,
+          baseGuests: b.pricing.package.base_guests,
+          maxGuests: b.pricing.package.max_guests,
+          extraAdults: b.pricing.package.extra_adults || 0,
+          children: b.pricing.package.chargeable_children || 0,
+          amount: b.pricing.package.amount,
+        }
+      : null,
     pricing: b.pricing || null,
     driver: b.driver || null,
     payment: {
@@ -107,7 +127,7 @@ export async function listBookings(page, pageSize = 30) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(1, page), totalPages);
   const docs = await bookings
-    .find({}, { projection: { personal_info: 1, booking_id: 1, rooms: 1, check_in: 1, check_out: 1, status: 1, payment: 1, paid_amount: 1, created_at: 1 } })
+    .find({}, { projection: { personal_info: 1, booking_id: 1, rooms: 1, check_in: 1, check_out: 1, status: 1, payment: 1, paid_amount: 1, created_at: 1, "pricing.package.name": 1 } })
     .sort({ created_at: -1, _id: -1 })
     .skip((current - 1) * pageSize)
     .limit(pageSize)

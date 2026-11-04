@@ -4,9 +4,9 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { BUSINESS } from "@/config/business";
 import { PRICES } from "@/config/pricing";
+import { invoiceLines } from "@/config/invoiceLines";
 import { adminFetch, formatMoney, formatDate, formatDateTime } from "@/lib/adminClient";
 
-const MEAL_LABEL = { lunch: "Lunch", dinner: "Dinner", lunchDinner: "Lunch + Dinner" };
 
 function Line({ label, sub, amount, bold }) {
   return (
@@ -37,7 +37,6 @@ function Invoice() {
   if (!b) return <p className="p-10 text-center text-sm opacity-60">Loading invoice…</p>;
 
   const p = b.pricing || {};
-  const a = p.addons || {};
   const nights = p.nights || b.nights || 1;
 
   return (
@@ -94,27 +93,9 @@ function Invoice() {
             </tr>
           </thead>
           <tbody className="divide-y divide-[#052a50]/5">
-            {b.roomLines.map((r) => (
-              <Line
-                key={r.roomId}
-                label={r.roomName}
-                sub={[
-                  `${r.nights} night${r.nights === 1 ? "" : "s"}${r.nightlyRate ? ` × ${formatMoney(r.nightlyRate)}` : ""}`,
-                  r.extraAdults ? `+${r.extraAdults} extra adult` : "",
-                  r.children ? `+${r.children} child` : "",
-                ].filter(Boolean).join(" · ")}
-                amount={formatMoney(r.amount)}
-              />
+            {invoiceLines(b, formatMoney).map((line, i) => (
+              <Line key={i} label={line.label} sub={line.sub} amount={formatMoney(line.amount)} />
             ))}
-            {a.mealSubtotal > 0 && (
-              <Line label={`Meals — ${MEAL_LABEL[a.mealPlan]}`} sub={`${a.mealGuests} guests × ${nights} nights`} amount={formatMoney(a.mealSubtotal)} />
-            )}
-            {a.driverAccommodation > 0 && (
-              <Line label="Driver accommodation" sub={`${a.drivers} × ${nights} nights`} amount={formatMoney(a.driverAccommodation)} />
-            )}
-            {a.driverMeals > 0 && (
-              <Line label={`Driver meals — ${MEAL_LABEL[a.driverMealPlan]}`} sub={`${a.drivers} × ${nights} nights`} amount={formatMoney(a.driverMeals)} />
-            )}
           </tbody>
         </table>
 

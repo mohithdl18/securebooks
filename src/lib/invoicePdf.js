@@ -2,11 +2,11 @@ import "server-only";
 import PDFDocument from "pdfkit";
 import { BUSINESS } from "@/config/business";
 import { PRICES } from "@/config/pricing";
+import { invoiceLines } from "@/config/invoiceLines";
 
 const NAVY = "#052a50";
 const GOLD = "#b08a28";
 const MUTED = "#5b6b7d";
-const MEAL_LABEL = { lunch: "Lunch", dinner: "Dinner", lunchDinner: "Lunch + Dinner" };
 
 // Built-in PDF fonts have no ₹ glyph, so amounts print as "Rs."
 const money = (v) =>
@@ -24,7 +24,6 @@ function drawInvoice(doc, b) {
   const right = doc.page.width - 50;
   const width = right - left;
   const p = b.pricing || {};
-  const a = p.addons || {};
   const nights = p.nights || b.nights || 1;
 
   // Header
@@ -78,17 +77,14 @@ function drawInvoice(doc, b) {
     y += 8;
   };
 
-  b.roomLines.forEach((r) => {
-    const sub = [
-      `${r.nights} night${r.nights === 1 ? "" : "s"}${r.nightlyRate ? ` x ${money(r.nightlyRate)}` : ""}`,
-      r.extraAdults ? `+${r.extraAdults} extra adult` : "",
-      r.children ? `+${r.children} child` : "",
-    ].filter(Boolean).join("  ·  ");
-    item(r.roomName, sub, money(r.amount));
-  });
-  if (a.mealSubtotal > 0) item(`Meals - ${MEAL_LABEL[a.mealPlan] || ""}`, `${a.mealGuests} guests x ${nights} nights`, money(a.mealSubtotal));
-  if (a.driverAccommodation > 0) item("Driver accommodation", `${a.drivers} x ${nights} nights`, money(a.driverAccommodation));
-  if (a.driverMeals > 0) item(`Driver meals - ${MEAL_LABEL[a.driverMealPlan] || ""}`, `${a.drivers} x ${nights} nights`, money(a.driverMeals));
+  // Built-in PDF fonts lack "×" and "—" in some viewers; use plain ASCII.
+  invoiceLines(b, money, "  ·  ").forEach((line) =>
+    item(
+      line.label.replace(/—/g, "-"),
+      (line.sub || "").replace(/×/g, "x").replace(/—/g, "-"),
+      money(line.amount)
+    )
+  );
 
   // Totals
   y += 6;

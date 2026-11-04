@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AdminModal from "./AdminModal";
 import StatusBadge from "./StatusBadge";
 import { adminFetch, formatMoney, formatDate, formatDateTime } from "@/lib/adminClient";
+import { invoiceLines, guestSummary } from "@/config/invoiceLines";
 
 const MEAL_LABEL = { lunch: "Lunch", dinner: "Dinner", lunchDinner: "Lunch + Dinner" };
 
@@ -129,7 +130,8 @@ export default function BookingDetailsModal({ bookingId, onClose, onRequestCance
               <Row label="Check-in" value={formatDate(booking.checkIn)} />
               <Row label="Check-out" value={formatDate(booking.checkOut)} />
               <Row label="Nights" value={String(booking.nights || "—")} />
-              <Row label="Rooms" value={booking.rooms.join(", ")} />
+              <Row label={booking.packageLine ? "Package" : "Rooms"} value={booking.packageLine ? `${booking.packageLine.name} — ${booking.rooms.join(", ")}` : booking.rooms.join(", ")} />
+              <Row label="Guests" value={guestSummary(booking)} />
               <Row label="Driver stay" value={booking.driver?.accommodation === "yes" ? `Yes (${a?.drivers || 0})` : "No"} />
               <Row label="Guest meals" value={a?.mealPlan ? `${MEAL_LABEL[a.mealPlan]} × ${a.mealGuests}` : "None"} />
               <Row label="Driver meals" value={a?.driverMealPlan ? MEAL_LABEL[a.driverMealPlan] : "None"} />
@@ -142,20 +144,15 @@ export default function BookingDetailsModal({ bookingId, onClose, onRequestCance
             </Card>
           )}
 
-          <Card title="Rooms">
+          <Card title={booking.packageLine ? "Package & add-ons" : "Rooms & add-ons"}>
             <div className="divide-y divide-[#052a50]/10">
-              {booking.roomLines.map((r) => (
-                <div key={r.roomId} className="flex items-start justify-between gap-4 py-2 text-sm">
+              {invoiceLines(booking, formatMoney).map((line, i) => (
+                <div key={i} className="flex items-start justify-between gap-4 py-2 text-sm">
                   <div>
-                    <p className="font-medium">{r.roomName}</p>
-                    <p className="text-xs opacity-60">
-                      {r.nights} night{r.nights === 1 ? "" : "s"}
-                      {r.nightlyRate ? ` × ${formatMoney(r.nightlyRate)}` : ""}
-                      {r.extraAdults ? ` · +${r.extraAdults} adult` : ""}
-                      {r.children ? ` · +${r.children} child` : ""}
-                    </p>
+                    <p className="font-medium">{line.label}</p>
+                    {line.sub && <p className="text-xs opacity-60">{line.sub}</p>}
                   </div>
-                  <span className="font-semibold">{formatMoney(r.amount)}</span>
+                  <span className="shrink-0 font-semibold">{formatMoney(line.amount)}</span>
                 </div>
               ))}
             </div>
@@ -165,7 +162,7 @@ export default function BookingDetailsModal({ bookingId, onClose, onRequestCance
             <Card title="Payment summary">
               {p ? (
                 <>
-                  <Row label="Rooms" value={formatMoney(p.roomSubtotal)} />
+                  <Row label={booking.packageLine ? "Package" : "Rooms"} value={formatMoney(p.roomSubtotal)} />
                   <Row label="Add-ons" value={formatMoney(a?.total)} />
                   {p.discount > 0 && <Row label={`Discount (${p.promoCode}, ${p.discountPercent}%)`} value={`− ${formatMoney(p.discount)}`} />}
                   <Row label="Tax" value={formatMoney(p.tax)} />

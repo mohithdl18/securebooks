@@ -43,7 +43,7 @@ export default function BookingsTable({ data, loading, error, onPage, onOpen, on
               >
                 <td className="px-4 py-3 font-mono text-xs">{b.bookingId}</td>
                 <td className="px-4 py-3 font-medium">{b.name || "—"}</td>
-                <td className="px-4 py-3">{b.rooms.join(", ") || "—"}</td>
+                <td className="px-4 py-3">{b.packageName ? `${b.packageName} (${b.rooms.length} rooms)` : b.rooms.join(", ") || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     <StatusBadge value={b.paymentStatus} />

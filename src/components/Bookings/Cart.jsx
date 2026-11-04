@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { getAvailablePackages } from "@/logic/packageAvailability";
+import { ALL_PACKAGES } from "@/logic/packageAvailability";
 import {
   PRICING,
-  calculateRoomPrice,
+  roomStayPrice,
+  packageStayPrice,
+  nightsBreakdown,
+  weekdayWeekendLabel,
   formatPrice,
 } from "@/logic/price";
 import Modal from "@/components/Bookings/Modal";
@@ -12,6 +15,8 @@ import Addons from "@/components/Bookings/Addons";
 import Checkout from "@/components/Bookings/Checkout";
 import Confirmation from "@/components/Bookings/Confirmation";
 import Rejected from "@/components/Bookings/Rejected";
+
+const PRICING_BASE_GUESTS = 2; // included in every room
 
 const RAZORPAY_SCRIPT_URL =
   "https://checkout.razorpay.com/v1/checkout.js";
@@ -166,6 +171,7 @@ export default function Cart({
   selectedRoomIds = [],
   selectedRoomData = [],
   selectedPackageIds = [],
+  selectedPackageData = null,
   availableRoomIds = null,
   nights = 1,
   onClear,
@@ -194,14 +200,45 @@ export default function Cart({
     selectedRoomIds.includes(room.id)
   );
 
-  const availablePackages = getAvailablePackages(availableRoomIds);
-
-  const selectedPackages = availablePackages.filter((pkg) =>
+  // At most one package; its guest counts come from the package card.
+  const selectedPackages = ALL_PACKAGES.filter((pkg) =>
     selectedPackageIds.includes(pkg.id)
+  ).map((pkg) =>
+    selectedPackageData?.id === pkg.id
+      ? { ...pkg, ...selectedPackageData }
+      : { ...pkg, extraAdults: 0, extraChildren: 0 }
   );
 
   const itemCount = selectedRooms.length + selectedPackages.length;
   const stayNights = Math.max(1, Number(nights) || 1);
+
+  // Everyone staying: 2 per room + extras, or the package's guests.
+  const totalGuests =
+    selectedRooms.reduce(
+      (sum, room) =>
+        sum +
+        PRICING_BASE_GUESTS +
+        (Number(room.extraAdults) || 0) +
+        (Number(room.extraChildren) || 0),
+      0
+    ) +
+    selectedPackages.reduce(
+      (sum, pkg) =>
+        sum +
+        pkg.baseGuests +
+        (Number(pkg.extraAdults) || 0) +
+        (Number(pkg.extraChildren) || 0),
+      0
+    );
+
+  function goToAddons() {
+    // Meals default to everyone staying; guests can adjust with − / +.
+    setAddons((previous) => ({
+      ...previous,
+      mealGuests: Math.max(1, totalGuests),
+    }));
+    setStep("addons");
+  }
 
   function resetAddons() {
     setAddons({
@@ -264,22 +301,10 @@ export default function Cart({
       };
     }
 
-    if (selectedPackages.length > 0) {
-      const message =
-        "Package payments are not enabled in the current payment API. Please select individual rooms or update the server-side pricing and payment routes to support packages.";
-
-      setPaymentMessage(message);
-
+    if (selectedRooms.length === 0 && selectedPackages.length === 0) {
       return {
         success: false,
-        message,
-      };
-    }
-
-    if (selectedRooms.length === 0) {
-      return {
-        success: false,
-        message: "Please select at least one room.",
+        message: "Please select a room or a package.",
       };
     }
 
@@ -313,11 +338,22 @@ export default function Cart({
         extraChildren: Math.max(0, Number(room.extraChildren) || 0),
       }));
 
+      const selectedPackage = selectedPackages[0] || null;
+
       const orderPayload = {
         TempID,
         checkIn,
         checkOut,
-        roomSelections,
+        // A booking is either one package or individual rooms.
+        ...(selectedPackage
+          ? {
+              packageSelection: {
+                packageId: selectedPackage.id,
+                extraAdults: Math.max(0, Number(selectedPackage.extraAdults) || 0),
+                extraChildren: Math.max(0, Number(selectedPackage.extraChildren) || 0),
+              },
+            }
+          : { roomSelections }),
         addons: {
           mealPlan: addons.mealPlan || "",
           mealGuests: Math.max(
@@ -726,19 +762,19 @@ export default function Cart({
             ) : (
               <div className="space-y-4">
                 {selectedRooms.map((room) => {
-                  const basePrice = PRICING.accommodation.weekday;
-
                   const extraAdults = Number(room.extraAdults) || 0;
                   const extraChildren = Number(room.extraChildren) || 0;
 
                   const roomNights = stayNights;
 
-                  const roomTotal = calculateRoomPrice({
-                          basePrice,
-                          extraAdults,
-                          chargeableChildren: extraChildren,
-                          nights: roomNights,
-                        });
+                  const stayPrice = roomStayPrice({
+                    checkIn: providedCheckIn,
+                    checkOut: providedCheckOut,
+                    nights: stayNights,
+                    extraAdults,
+                    extraChildren,
+                  });
+                  const roomTotal = stayPrice.total;
 
                   return (
                     <article
@@ -761,14 +797,20 @@ export default function Cart({
                           </p>
 
                           <p className="mt-2 text-xs leading-5 text-[#052a50]/65">
-                            Base rate: {formatPrice(basePrice)} / night
+                            Base rate: {weekdayWeekendLabel(PRICING.accommodation)} / night
                           </p>
+
+                          {stayPrice.weekendNights > 0 && (
+                            <p className="text-xs leading-5 text-[#052a50]/65">
+                              {nightsBreakdown(stayPrice)}
+                            </p>
+                          )}
 
                           {extraAdults > 0 && (
                             <p className="text-xs leading-5 text-[#052a50]/65">
                               {extraAdults} extra{" "}
                               {extraAdults === 1 ? "adult" : "adults"} ×{" "}
-                              {formatPrice(PRICING.extraGuests.adult)} / night
+                              {weekdayWeekendLabel(PRICING.extraGuests.adult)} / night
                             </p>
                           )}
 
@@ -776,7 +818,7 @@ export default function Cart({
                             <p className="text-xs leading-5 text-[#052a50]/65">
                               {extraChildren}{" "}
                               {extraChildren === 1 ? "child" : "children"} ×{" "}
-                              {formatPrice(PRICING.extraGuests.child)} / night
+                              {weekdayWeekendLabel(PRICING.extraGuests.child)} / night
                             </p>
                           )}
 
@@ -794,9 +836,16 @@ export default function Cart({
                 })}
 
                 {selectedPackages.map((pkg) => {
-                  const basePrice = Number(
-                    pkg.price ?? pkg.basePrice ?? 0
-                  );
+                  const extraAdults = Number(pkg.extraAdults) || 0;
+                  const extraChildren = Number(pkg.extraChildren) || 0;
+                  const stayPrice = packageStayPrice({
+                    packageId: pkg.id,
+                    checkIn: providedCheckIn,
+                    checkOut: providedCheckOut,
+                    nights: stayNights,
+                    extraAdults,
+                    extraChildren,
+                  });
 
                   return (
                     <article
@@ -810,19 +859,47 @@ export default function Cart({
                           </p>
 
                           <h3 className="mt-1 font-semibold text-[#052a50]">
-                            {pkg.name || pkg.shortName}
+                            {pkg.name}
                           </h3>
 
                           <p className="mt-1 text-sm text-[#052a50]/60">
                             {stayNights}{" "}
-                            {stayNights === 1 ? "night" : "nights"}
+                            {stayNights === 1 ? "night" : "nights"} ·{" "}
+                            {pkg.baseGuests + extraAdults + extraChildren} guests
+                          </p>
+
+                          <p className="mt-2 text-xs leading-5 text-[#052a50]/65">
+                            {formatPrice(pkg.pricePerNight)} / night for{" "}
+                            {pkg.baseGuests} guests
+                          </p>
+
+                          <p className="text-xs leading-5 text-[#052a50]/65">
+                            Includes {pkg.includedRooms.join(", ")}
+                          </p>
+
+                          {extraAdults > 0 && (
+                            <p className="text-xs leading-5 text-[#052a50]/65">
+                              {extraAdults} extra{" "}
+                              {extraAdults === 1 ? "adult" : "adults"} ×{" "}
+                              {weekdayWeekendLabel(PRICING.extraGuests.adult)} / night
+                            </p>
+                          )}
+
+                          {extraChildren > 0 && (
+                            <p className="text-xs leading-5 text-[#052a50]/65">
+                              {extraChildren}{" "}
+                              {extraChildren === 1 ? "child" : "children"} ×{" "}
+                              {weekdayWeekendLabel(PRICING.extraGuests.child)} / night
+                            </p>
+                          )}
+
+                          <p className="mt-1 text-xs text-[#052a50]/55">
+                            Breakfast included
                           </p>
                         </div>
 
                         <p className="shrink-0 text-right text-sm font-semibold text-[#052a50]">
-                          {basePrice > 0
-                            ? formatPrice(basePrice * stayNights)
-                            : "Price to be confirmed"}
+                          {formatPrice(stayPrice.total)}
                         </p>
                       </div>
                     </article>
@@ -845,7 +922,7 @@ export default function Cart({
 
                   <button
                     type="button"
-                    onClick={() => setStep("addons")}
+                    onClick={goToAddons}
                     className="flex-1 rounded-xl bg-[#052a50] px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-[#e4b441] hover:text-[#052a50]"
                   >
                     Next
@@ -860,6 +937,7 @@ export default function Cart({
         {step === "addons" && (
           <Addons
             nights={stayNights}
+            defaultMealGuests={Math.max(1, totalGuests)}
             value={addons}
             onChange={setAddons}
             onBack={() => setStep("cart")}
@@ -876,6 +954,8 @@ export default function Cart({
             addons={addons}
             details={customerDetails}
             nights={stayNights}
+            checkIn={providedCheckIn}
+            checkOut={providedCheckOut}
             onBack={() => setStep("addons")}
             onPay={handlePay}
             paymentMessage={paymentMessage}

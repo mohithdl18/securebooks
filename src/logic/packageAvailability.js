@@ -1,60 +1,73 @@
 
-const ALL_ROOM_IDS = ["Room1", "Room2", "Room3", "Room4"];
+import rooms from "@/data/rooms.json";
+import { PACKAGES } from "@/config/pricing";
 
-// Pond View Cottage is excluded from this package.
-const VILLA_WITHOUT_COTTAGE_IDS = ["Room1", "Room2", "Room3"];
+const unique = (list) => [...new Set(list.filter(Boolean))];
 
+// Display details for each package. Prices and guest limits come from
+// src/config/pricing.js (the same file the server charges from).
+const DISPLAY = {
+  FullVilla: {
+    number: "01",
+    shortName: "FULL VILLA",
+    tagline: "The complete SU VILLA, all to yourselves.",
+    description:
+      "Book the entire villa — both Family Suites, the Couple Suite and the Pond View Cottage — for your family or group.",
+    image: "/images/packages/package1.jpg",
+  },
+  VillaWithoutCottage: {
+    number: "02",
+    shortName: "VILLA WITHOUT COTTAGE",
+    tagline: "The whole villa, minus the cottage.",
+    description:
+      "Book both Family Suites and the Couple Suite together. The Pond View Cottage is not included.",
+    image: "/images/packages/package2.jpg",
+  },
+};
+
+function buildPackage(def) {
+  const included = def.roomIds.map((id) => rooms.find((r) => r.id === id)).filter(Boolean);
+  const display = DISPLAY[def.id] || {};
+  return {
+    ...display,
+    id: def.id,
+    name: def.name,
+    roomIds: [...def.roomIds],
+    includedRooms: included.map((r) => r.name),
+    baseGuests: def.baseGuests,
+    maxGuests: def.maxGuests,
+    pricePerNight: def.pricePerNight,
+    // Same amenities as the rooms it contains.
+    highlights: unique(["Breakfast Included", ...included.flatMap((r) => r.highlights || [])]),
+    features: unique(included.flatMap((r) => r.features || [])),
+    bathroom: unique(included.flatMap((r) => r.bathroom || [])),
+    tech: unique(included.flatMap((r) => r.tech || [])),
+    amenities: unique(included.flatMap((r) => r.amenities || [])),
+    images: unique(included.flatMap((r) => r.images || [])),
+    heroImage: display.image,
+    details: [
+      { label: "Guests", value: `${def.baseGuests} included · up to ${def.maxGuests}` },
+      { label: "Rooms", value: `${included.length} — ${included.map((r) => r.name).join(", ")}` },
+      { label: "Views", value: unique(included.map((r) => r.details?.find((d) => d.label === "View")?.value)).join(", ") },
+      { label: "Breakfast", value: "Included" },
+    ],
+  };
+}
+
+export const ALL_PACKAGES = Object.values(PACKAGES).map(buildPackage);
+
+export function getPackageById(id) {
+  return ALL_PACKAGES.find((p) => p.id === id) || null;
+}
+
+/** A package is available only if EVERY room in it is available. */
+export function isPackageAvailable(pkg, availableRoomIds) {
+  if (!Array.isArray(availableRoomIds)) return false;
+  return pkg.roomIds.every((id) => availableRoomIds.includes(id));
+}
+
+/** Kept for compatibility: only the packages that are fully available. */
 export function getAvailablePackages(availableRoomIds) {
-  if (!Array.isArray(availableRoomIds)) {
-    return [];
-  }
-
-  const allRoomsAvailable = ALL_ROOM_IDS.every((id) =>
-    availableRoomIds.includes(id)
-  );
-
-  const villaWithoutCottageAvailable =
-    VILLA_WITHOUT_COTTAGE_IDS.every((id) =>
-      availableRoomIds.includes(id)
-    );
-
-  const packages = [];
-
-  if (allRoomsAvailable) {
-    packages.push({
-      id: "FullVilla",
-      number: "01",
-      shortName: "Full Villa",
-      name: "Full Villa",
-      tagline: "The complete SU VILLA experience.",
-      description:
-        "Enjoy the entire villa, including all four rooms and the Pond View Cottage.",
-      image: "/images/packages/package1.jpg",
-      highlights: [
-        "All 4 Rooms",
-        "Pond View Cottage Included",
-        "Breakfast Included",
-      ],
-    });
-  }
-
-  if (villaWithoutCottageAvailable) {
-    packages.push({
-      id: "VillaWithoutCottage",
-      number: "02",
-      shortName: "Without Cottage",
-      name: "Villa without Cottage",
-      tagline: "A private villa stay without the cottage.",
-      description:
-        "Enjoy the villa with three rooms, excluding the Pond View Cottage.",
-      image: "/images/packages/package2.jpg",
-      highlights: [
-        "3 Rooms",
-        "Pond View Cottage Excluded",
-        "Breakfast Included",
-      ],
-    });
-  }
-
-  return packages;
+  if (!Array.isArray(availableRoomIds)) return [];
+  return ALL_PACKAGES.filter((p) => isPackageAvailable(p, availableRoomIds));
 }

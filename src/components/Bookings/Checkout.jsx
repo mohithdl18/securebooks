@@ -2,8 +2,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PRICES, roundMoney } from "@/config/pricing";
-import { calculateRoomPrice } from "@/logic/price";
+import {
+  PRICES,
+  roomStayPrice,
+  packageStayPrice,
+  totalsFromSubtotal,
+} from "@/config/pricing";
 
 const COLORS = {
   background: "#F7FAEE",
@@ -49,8 +53,17 @@ function getPackageName(pkg) {
   return pkg?.name || pkg?.shortName || "Stay Package";
 }
 
-function getPackagePrice(pkg) {
-  return Math.max(0, Number(pkg?.price ?? pkg?.basePrice ?? 0));
+function nightsSummary(price, extraAdults, extraChildren) {
+  const parts = [];
+  if (price.weekdayNights)
+    parts.push(`${price.weekdayNights} weekday ${price.weekdayNights === 1 ? "night" : "nights"}`);
+  if (price.weekendNights)
+    parts.push(`${price.weekendNights} weekend ${price.weekendNights === 1 ? "night" : "nights"}`);
+  const extras = [
+    extraAdults ? `+${extraAdults} adult${extraAdults === 1 ? "" : "s"}` : "",
+    extraChildren ? `+${extraChildren} child${extraChildren === 1 ? "" : "ren"}` : "",
+  ].filter(Boolean);
+  return [parts.join(" + "), ...extras].filter(Boolean).join(" · ");
 }
 
 export default function Checkout({
@@ -59,6 +72,8 @@ export default function Checkout({
   addons = {},
   details = {},
   nights = 1,
+  checkIn = "",
+  checkOut = "",
   onBack,
   onPay,
   paymentMessage = "",
@@ -83,10 +98,16 @@ export default function Checkout({
 
   const stayNights = Math.max(1, Number(nights) || 1);
 
-  const guestCount = Math.max(
-    0,
-    Number(addons.mealGuests ?? addons.totalGuests ?? 2) || 0
-  );
+  // Everyone staying: 2 per room + extras, or the package's guests.
+  const guestCount =
+    rooms.reduce(
+      (sum, r) => sum + PRICES.includedGuestsPerRoom + (Number(r.extraAdults) || 0) + (Number(r.extraChildren) || 0),
+      0
+    ) +
+    packages.reduce(
+      (sum, p) => sum + (p.baseGuests || 0) + (Number(p.extraAdults) || 0) + (Number(p.extraChildren) || 0),
+      0
+    );
 
   const roomCount = rooms.length;
   const packageCount = packages.length;
@@ -103,46 +124,47 @@ export default function Checkout({
   const mealGuests = Math.max(0, Number(addons.mealGuests) || 0);
   const driverCount = Math.max(0, Number(addons.drivers) || 0);
 
+  // Every line is priced from the shared price list (weekday/weekend
+  // rates night by night) — the same functions the server charges with.
   const roomLines = useMemo(
     () =>
       rooms.map((room) => {
-        // Always priced from the shared price list, never from
-        // values carried on the room object.
-        const total = calculateRoomPrice({
-          basePrice: PRICES.roomPerNight,
-          extraAdults: Math.max(0, Math.floor(Number(room.extraAdults) || 0)),
-          chargeableChildren: Math.max(0, Math.floor(Number(room.extraChildren) || 0)),
-          nights: stayNights,
-        });
-
+        const extraAdults = Math.max(0, Math.floor(Number(room.extraAdults) || 0));
+        const extraChildren = Math.max(0, Math.floor(Number(room.extraChildren) || 0));
+        const price = roomStayPrice({ checkIn, checkOut, nights: stayNights, extraAdults, extraChildren });
         return {
           id: room.id,
           name: getRoomName(room),
-          quantity: stayNights,
-          unitPrice: total / stayNights,
-          total,
+          sub: nightsSummary(price, extraAdults, extraChildren),
+          total: price.total,
         };
       }),
-    [rooms, stayNights]
+    [rooms, stayNights, checkIn, checkOut]
   );
 
   const packageLines = useMemo(
     () =>
       packages.map((pkg) => {
-        const total = Math.max(
-          0,
-          Number(pkg.totalPrice ?? getPackagePrice(pkg) * stayNights) || 0
-        );
-
+        const extraAdults = Math.max(0, Math.floor(Number(pkg.extraAdults) || 0));
+        const extraChildren = Math.max(0, Math.floor(Number(pkg.extraChildren) || 0));
+        const price = packageStayPrice({
+          packageId: pkg.id,
+          checkIn,
+          checkOut,
+          nights: stayNights,
+          extraAdults,
+          extraChildren,
+        });
         return {
           id: pkg.id,
           name: getPackageName(pkg),
-          quantity: stayNights,
-          unitPrice: total / stayNights,
-          total,
+          sub: `${formatPrice(pkg.pricePerNight)} × ${price.nights} ${price.nights === 1 ? "night" : "nights"} for ${pkg.baseGuests} guests${
+            extraAdults || extraChildren ? ` · ${nightsSummary({ weekdayNights: 0, weekendNights: 0 }, extraAdults, extraChildren)}` : ""
+          }`,
+          total: price ? price.total : 0,
         };
       }),
-    [packages, stayNights]
+    [packages, stayNights, checkIn, checkOut]
   );
 
   const roomSubtotal = roomLines.reduce(
@@ -172,22 +194,18 @@ export default function Checkout({
   const addonsTotal = calculatedAddonsTotal;
 
   // Same formula and rounding as the server (src/lib/pricing.js).
-  const subtotal = roundMoney(roomSubtotal + packageSubtotal + addonsTotal);
-
-  const discountRate = appliedPromo
-    ? appliedPromo.discount / 100
-    : 0;
-
-  const discountAmount = Math.min(
-    subtotal,
-    appliedPromo?.maxDiscount || Infinity,
-    roundMoney(subtotal * discountRate)
+  const totals = totalsFromSubtotal(
+    roomSubtotal + packageSubtotal + addonsTotal,
+    appliedPromo
+      ? { percent: appliedPromo.discount, maxDiscount: appliedPromo.maxDiscount || null }
+      : null
   );
-
-  const discountedSubtotal = roundMoney(Math.max(0, subtotal - discountAmount));
-  const taxAmount = roundMoney(discountedSubtotal * TAX_RATE);
-  const platformFee = roundMoney(discountedSubtotal * PLATFORM_FEE_RATE);
-  const totalAmount = roundMoney(discountedSubtotal + taxAmount + platformFee);
+  const subtotal = totals.subtotal;
+  const discountAmount = totals.discount;
+  const discountedSubtotal = totals.taxable;
+  const taxAmount = totals.tax;
+  const platformFee = totals.platformFee;
+  const totalAmount = totals.total;
 
   async function applyPromoCode(event) {
     event.preventDefault();
@@ -490,10 +508,7 @@ export default function Checkout({
             >
               <div className="min-w-0">
                 <p className="text-sm font-medium">{line.name}</p>
-                <p className="mt-1 text-xs text-[#052a50]/55">
-                  {formatPrice(line.unitPrice)} × {line.quantity}{" "}
-                  {line.quantity === 1 ? "night" : "nights"}
-                </p>
+                <p className="mt-1 text-xs text-[#052a50]/55">{line.sub}</p>
               </div>
 
               <p className="shrink-0 text-right text-sm font-semibold">
@@ -509,10 +524,7 @@ export default function Checkout({
             >
               <div className="min-w-0">
                 <p className="text-sm font-medium">{line.name}</p>
-                <p className="mt-1 text-xs text-[#052a50]/55">
-                  {formatPrice(line.unitPrice)} × {line.quantity}{" "}
-                  {line.quantity === 1 ? "night" : "nights"}
-                </p>
+                <p className="mt-1 text-xs text-[#052a50]/55">{line.sub}</p>
               </div>
 
               <p className="shrink-0 text-right text-sm font-semibold">

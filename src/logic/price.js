@@ -1,17 +1,22 @@
 
-import { PRICES } from "@/config/pricing";
+import {
+  PRICES,
+  PACKAGES,
+  roomStayPrice,
+  packageStayPrice,
+  stayNights,
+} from "@/config/pricing";
 
 /**
- * Display helpers. Prices come from src/config/pricing.js — the same
+ * Display helpers. All prices come from src/config/pricing.js — the same
  * file the server uses to charge. Breakfast is complimentary.
+ * Weekend = Friday, Saturday and Sunday nights.
  */
 export const PRICING = {
-  accommodation: {
-    weekday: PRICES.roomPerNight, // single rate for every night
-  },
+  accommodation: { ...PRICES.roomPerNight },
   extraGuests: {
-    adult: PRICES.extraAdultPerNight,
-    child: PRICES.extraChildPerNight,
+    adult: { ...PRICES.extraAdultPerNight },
+    child: { ...PRICES.extraChildPerNight },
     complimentaryChildMaxAge: 5,
   },
   meals: { ...PRICES.meals },
@@ -28,56 +33,42 @@ export const PRICING = {
   },
 };
 
+export { PACKAGES, roomStayPrice, packageStayPrice, stayNights };
+
 /**
- * Calculate additional guest charges before tax.
+ * Room price for the stay (night-by-night weekday/weekend rates).
+ * Pass checkIn/checkOut when known; otherwise `nights` weekday nights.
  */
 export function calculateRoomPrice({
-  basePrice = 0,
+  checkIn = "",
+  checkOut = "",
+  nights = 1,
   extraAdults = 0,
   chargeableChildren = 0,
-  nights = 1,
 } = {}) {
-  const validNights = Math.max(1, Number(nights) || 1);
-
-  const nightlyPrice =
-    Number(basePrice || 0) +
-    Number(extraAdults || 0) * PRICING.extraGuests.adult +
-    Number(chargeableChildren || 0) * PRICING.extraGuests.child;
-
-  return nightlyPrice * validNights;
+  return roomStayPrice({
+    checkIn,
+    checkOut,
+    nights,
+    extraAdults,
+    extraChildren: chargeableChildren,
+  }).total;
 }
 
-/**
- * Calculate meal costs before tax.
- */
-export function calculateMealPrice({
-  mealType = null,
-  guests = 0,
-  nights = 1,
-} = {}) {
-  if (!mealType || !(mealType in PRICING.meals)) {
-    return 0;
-  }
-
-  return (
-    PRICING.meals[mealType] *
-    Math.max(0, Number(guests) || 0) *
-    Math.max(1, Number(nights) || 1)
-  );
+/** "2 weekday + 1 weekend night" style summary. */
+export function nightsBreakdown(price) {
+  if (!price) return "";
+  const parts = [];
+  if (price.weekdayNights)
+    parts.push(`${price.weekdayNights} weekday ${price.weekdayNights === 1 ? "night" : "nights"}`);
+  if (price.weekendNights)
+    parts.push(`${price.weekendNights} weekend ${price.weekendNights === 1 ? "night" : "nights"}`);
+  return parts.join(" + ");
 }
 
-/**
- * Calculate driver accommodation before tax.
- */
-export function calculateDriverAccommodationPrice({
-  drivers = 0,
-  nights = 1,
-} = {}) {
-  return (
-    Math.max(0, Number(drivers) || 0) *
-    PRICING.driverAccommodation.perDriverPerNight *
-    Math.max(1, Number(nights) || 1)
-  );
+/** "₹4,000 weekdays · ₹4,500 weekends" */
+export function weekdayWeekendLabel(rate) {
+  return `${formatPrice(rate.weekday)} weekdays · ${formatPrice(rate.weekend)} weekends`;
 }
 
 /**

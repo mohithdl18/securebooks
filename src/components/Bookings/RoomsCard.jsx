@@ -8,6 +8,9 @@ import RoomsModal from "./RoomsModal";
 import {
   PRICING,
   calculateRoomPrice,
+  roomStayPrice,
+  nightsBreakdown,
+  weekdayWeekendLabel,
   formatPrice,
 } from "@/logic/price";
 import { updateBookingRooms } from "@/logic/Data";
@@ -18,6 +21,8 @@ export default function RoomsCard({
   selectedRoomIds = [],
   nights = 1,
   availableRoomIds = null,
+  checkIn = "",
+  checkOut = "",
 }) {
   const [occupancy, setOccupancy] = useState({});
   const [activeRoom, setActiveRoom] = useState(null);
@@ -40,15 +45,14 @@ export default function RoomsCard({
         };
 
         const stayNights = Math.max(1, Number(nights) || 1);
-        const basePrice = Number(
-          PRICING.accommodation.weekday
-        );
+        const basePrice = PRICING.accommodation.weekday;
 
         const totalPrice = calculateRoomPrice({
-          basePrice,
+          checkIn,
+          checkOut,
+          nights: stayNights,
           extraAdults: guests.adults,
           chargeableChildren: guests.children,
-          nights: stayNights,
         });
 
         return {
@@ -64,7 +68,7 @@ export default function RoomsCard({
       .filter(Boolean);
 
     updateBookingRooms(selectedRooms);
-  }, [selectedRoomIds, occupancy, nights]);
+  }, [selectedRoomIds, occupancy, nights, checkIn, checkOut]);
 
   const updateOccupancy = (roomId, type, change) => {
     // Do not allow occupancy changes for sold-out rooms.
@@ -100,15 +104,14 @@ export default function RoomsCard({
 
     const stayNights = Math.max(1, Number(nights) || 1);
 
-    const basePrice = Number(
-      PRICING.accommodation.weekday
-    );
+    const basePrice = PRICING.accommodation.weekday;
 
     const totalPrice = calculateRoomPrice({
-      basePrice,
+      checkIn,
+      checkOut,
+      nights: stayNights,
       extraAdults: updatedGuests.adults,
       chargeableChildren: updatedGuests.children,
-      nights: stayNights,
     });
 
     if (selectedRoomIds.includes(roomId)) {
@@ -138,16 +141,16 @@ export default function RoomsCard({
 
           const stayNights = Math.max(1, Number(nights) || 1);
 
-          const basePrice = Number(
-            PRICING.accommodation.weekday
-          );
+          const basePrice = PRICING.accommodation.weekday;
 
-          const totalPrice = calculateRoomPrice({
-            basePrice,
-            extraAdults: guests.adults,
-            chargeableChildren: guests.children,
+          const stayPrice = roomStayPrice({
+            checkIn,
+            checkOut,
             nights: stayNights,
+            extraAdults: guests.adults,
+            extraChildren: guests.children,
           });
+          const totalPrice = stayPrice.total;
 
           return (
             <article
@@ -336,7 +339,7 @@ export default function RoomsCard({
                       </p>
 
                       <p className="mt-1 text-xs text-gray-500">
-                        {formatPrice(PRICING.extraGuests.adult)} / night
+                        {weekdayWeekendLabel(PRICING.extraGuests.adult)} / night
                       </p>
                     </div>
 
@@ -387,7 +390,7 @@ export default function RoomsCard({
                       </p>
 
                       <p className="mt-1 text-xs text-gray-500">
-                        {formatPrice(PRICING.extraGuests.child)} / night
+                        {weekdayWeekendLabel(PRICING.extraGuests.child)} / night
                       </p>
                     </div>
 
@@ -454,10 +457,15 @@ export default function RoomsCard({
                     </p>
 
                     <p className="mt-1 text-xs leading-5 text-gray-500">
-                      {formatPrice(basePrice)} base rate + extra guests,
-                      multiplied by {stayNights}{" "}
-                      {stayNights === 1 ? "night" : "nights"}. Taxes are not
-                      included.
+                      {weekdayWeekendLabel(PRICING.accommodation)} per
+                      night (weekends are Fri–Sun nights).
+                      {checkIn && checkOut
+                        ? ` Your stay: ${nightsBreakdown(stayPrice)}`
+                        : ` ${stayNights} ${stayNights === 1 ? "night" : "nights"} at the weekday rate`}
+                      {guests.adults + guests.children > 0
+                        ? ", including extra guests."
+                        : "."}{" "}
+                      Taxes are not included.
                     </p>
                   </div>
 

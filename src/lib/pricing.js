@@ -1,30 +1,33 @@
 import "server-only";
 import rooms from "@/data/rooms.json";
 import { RequestError } from "@/lib/security";
-import { getStayDates } from "@/lib/validation";
-
-import { PRICES, roundMoney } from "@/config/pricing";
+import {
+  PRICES,
+  PACKAGES,
+  roundMoney,
+  roomStayPrice,
+  packageStayPrice,
+  totalsFromSubtotal,
+  stayNights,
+} from "@/config/pricing";
 
 /**
  * SERVER-SIDE PRICE CALCULATION.
- * Uses the same price list the website displays (src/config/pricing.js),
- * but only the server's copy decides what Razorpay charges. Nothing in
- * the request body (prices, totals, discounts) is ever used as a price.
+ * Uses the same price list and formulas the website displays
+ * (src/config/pricing.js), but only the server's copy decides what
+ * Razorpay charges. Nothing in the request body (prices, totals,
+ * discounts) is ever used as a price.
  */
-export const ROOM_RATE = PRICES.roomPerNight;
-export const EXTRA_ADULT_RATE = PRICES.extraAdultPerNight;
-export const EXTRA_CHILD_RATE = PRICES.extraChildPerNight;
 export const ADDON_RATES = {
   ...PRICES.meals,
   driverAccommodation: PRICES.driverAccommodationPerNight,
 };
-export const TAX_RATE = PRICES.taxRate;
-export const PLATFORM_FEE_RATE = PRICES.platformFeeRate;
 export const BASE_OCCUPANCY = PRICES.includedGuestsPerRoom;
 export const MAX_DRIVERS = PRICES.maxDrivers;
 
 const VALID_PLANS = ["", "lunch", "dinner", "lunchDinner"];
 const round = roundMoney;
+const roomName = (id) => rooms.find((r) => r.id === id)?.name || id;
 
 function intInRange(value, min, max, label) {
   const n = Number(value ?? 0);
@@ -34,45 +37,102 @@ function intInRange(value, min, max, label) {
   return n;
 }
 
+/** Validates a package choice. Returns the package definition. */
+export function resolvePackage(packageSelection) {
+  const pkg = PACKAGES[packageSelection?.packageId];
+  if (!pkg) throw new RequestError("Invalid package selection.");
+  return pkg;
+}
+
 /**
+ * Either `roomSelections` (individual rooms) OR `packageSelection`
+ * ({ packageId, extraAdults, extraChildren }) — never both.
  * @param promo  result of resolvePromo() or null
  */
-export function quoteBooking({ roomSelections, checkIn, checkOut, addons = {}, promo = null }) {
-  const nights = getStayDates(checkIn, checkOut).length;
+export function quoteBooking({ roomSelections = null, packageSelection = null, checkIn, checkOut, addons = {}, promo = null }) {
+  const nightsList = stayNights(checkIn, checkOut);
+  const nights = nightsList.length;
+  const weekendNights = nightsList.filter((n) => n.weekend).length;
 
-  let roomSubtotal = 0;
+  let staySubtotal = 0;
   let totalOccupants = 0;
+  let pricedRooms = [];
+  let pricedPackage = null;
 
-  const pricedRooms = roomSelections.map((selection) => {
-    const room = rooms.find((r) => r.id === selection.roomId);
-    const base = ROOM_RATE;
-    if (!room) throw new RequestError("Invalid room selection.");
-
-    const extraAdults = intInRange(selection.extraAdults, 0, 10, "number of extra adults");
-    const extraChildren = intInRange(selection.extraChildren, 0, 10, "number of children");
-    const occupants = BASE_OCCUPANCY + extraAdults + extraChildren;
-    if (room.maxGuests && occupants > room.maxGuests) {
-      throw new RequestError(`${room.name} allows at most ${room.maxGuests} guests.`);
+  if (packageSelection) {
+    const pkg = resolvePackage(packageSelection);
+    const maxExtras = pkg.maxGuests - pkg.baseGuests;
+    const extraAdults = intInRange(packageSelection.extraAdults, 0, maxExtras, "number of extra adults");
+    const extraChildren = intInRange(packageSelection.extraChildren, 0, maxExtras, "number of children");
+    if (extraAdults + extraChildren > maxExtras) {
+      throw new RequestError(`${pkg.name} allows at most ${pkg.maxGuests} guests.`);
     }
-    totalOccupants += occupants;
-
-    const amount = round(
-      (base + extraAdults * EXTRA_ADULT_RATE + extraChildren * EXTRA_CHILD_RATE) * nights
-    );
-    roomSubtotal += amount;
-
-    return {
-      roomId: room.id,
-      roomName: room.name,
+    const price = packageStayPrice({ packageId: pkg.id, checkIn, checkOut, extraAdults, extraChildren });
+    totalOccupants = pkg.baseGuests + extraAdults + extraChildren;
+    staySubtotal = price.total;
+    pricedPackage = {
+      packageId: pkg.id,
+      name: pkg.name,
+      roomIds: [...pkg.roomIds],
+      nights,
+      weekday_nights: price.weekdayNights,
+      weekend_nights: price.weekendNights,
+      price_per_night: pkg.pricePerNight,
+      base_guests: pkg.baseGuests,
+      max_guests: pkg.maxGuests,
+      extra_adults: extraAdults,
+      chargeable_children: extraChildren,
+      base_amount: price.base,
+      extras_amount: price.extras,
+      amount: price.total,
+    };
+    // Every room in the package is recorded (amount 0 — the package line
+    // carries the price) so availability, admin and cancellation work.
+    pricedRooms = pkg.roomIds.map((id) => ({
+      roomId: id,
+      roomName: roomName(id),
       check_in: checkIn,
       check_out: checkOut,
       nights,
-      nightly_rate: base,
-      extra_adults: extraAdults,
-      chargeable_children: extraChildren,
-      amount,
-    };
-  });
+      packageId: pkg.id,
+      extra_adults: 0,
+      chargeable_children: 0,
+      amount: 0,
+    }));
+  } else {
+    if (!Array.isArray(roomSelections) || !roomSelections.length) {
+      throw new RequestError("Select at least one room.");
+    }
+    pricedRooms = roomSelections.map((selection) => {
+      const room = rooms.find((r) => r.id === selection.roomId);
+      if (!room) throw new RequestError("Invalid room selection.");
+
+      const extraAdults = intInRange(selection.extraAdults, 0, 10, "number of extra adults");
+      const extraChildren = intInRange(selection.extraChildren, 0, 10, "number of children");
+      const occupants = BASE_OCCUPANCY + extraAdults + extraChildren;
+      if (room.maxGuests && occupants > room.maxGuests) {
+        throw new RequestError(`${room.name} allows at most ${room.maxGuests} guests.`);
+      }
+      totalOccupants += occupants;
+
+      const price = roomStayPrice({ checkIn, checkOut, extraAdults, extraChildren });
+      staySubtotal += price.total;
+
+      return {
+        roomId: room.id,
+        roomName: room.name,
+        check_in: checkIn,
+        check_out: checkOut,
+        nights,
+        weekday_nights: price.weekdayNights,
+        weekend_nights: price.weekendNights,
+        nightly_rate: price.weekendNights ? null : PRICES.roomPerNight.weekday,
+        extra_adults: extraAdults,
+        chargeable_children: extraChildren,
+        amount: price.total,
+      };
+    });
+  }
 
   const mealPlan = typeof addons.mealPlan === "string" ? addons.mealPlan : "";
   const driverMealPlan = typeof addons.driverMealPlan === "string" ? addons.driverMealPlan : "";
@@ -90,18 +150,16 @@ export function quoteBooking({ roomSelections, checkIn, checkOut, addons = {}, p
   const driverMeals =
     driverMealPlan && drivers > 0 ? ADDON_RATES[driverMealPlan] * drivers * nights : 0;
 
-  const subtotal = round(roomSubtotal + meal + driverStay + driverMeals);
-  const discountPercent = promo ? promo.percent : 0;
-  let discount = round(subtotal * (discountPercent / 100));
-  if (promo?.maxDiscount) discount = Math.min(discount, promo.maxDiscount);
-  const taxable = round(subtotal - discount);
-  const tax = round(taxable * TAX_RATE);
-  const platformFee = round(taxable * PLATFORM_FEE_RATE);
+  const totals = totalsFromSubtotal(staySubtotal + meal + driverStay + driverMeals, promo);
 
   return {
     nights,
+    weekday_nights: nights - weekendNights,
+    weekend_nights: weekendNights,
+    guests: totalOccupants,
+    package: pricedPackage,
     rooms: pricedRooms,
-    roomSubtotal: round(roomSubtotal),
+    roomSubtotal: round(staySubtotal),
     addons: {
       mealPlan,
       mealGuests,
@@ -112,12 +170,12 @@ export function quoteBooking({ roomSelections, checkIn, checkOut, addons = {}, p
       driverMeals: round(driverMeals),
       total: round(meal + driverStay + driverMeals),
     },
-    subtotal,
+    subtotal: totals.subtotal,
     promoCode: promo ? promo.code : null,
-    discountPercent,
-    discount,
-    tax,
-    platformFee,
-    total: round(taxable + tax + platformFee),
+    discountPercent: totals.discountPercent,
+    discount: totals.discount,
+    tax: totals.tax,
+    platformFee: totals.platformFee,
+    total: totals.total,
   };
 }

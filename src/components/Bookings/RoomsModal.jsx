@@ -24,7 +24,7 @@ export default function RoomsModal({ room, onClose }) {
   if (!room) return null;
 
   const amenityGroups = [
-    { title: "Room Features", items: room.features || [] },
+    { title: room.roomIds ? "Rooms' Features" : "Room Features", items: room.features || [] },
     { title: "Bathroom", items: room.bathroom || [] },
     { title: "Technology & Comfort", items: room.tech || [] },
     { title: "Additional Amenities", items: room.amenities || [] },
@@ -46,7 +46,7 @@ export default function RoomsModal({ room, onClose }) {
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[#052a50]/10 px-5 py-4 sm:px-7">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b08a28]">
-              Room {room.number}
+              {room.roomIds ? "Package" : "Room"} {room.number}
             </p>
 
             <h2
