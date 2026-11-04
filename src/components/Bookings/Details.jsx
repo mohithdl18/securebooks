@@ -318,7 +318,7 @@ export default function Details({
           />
 
           <p className="mt-2 text-xs leading-relaxed text-[#052a50]/60">
-            We keep only the last 4 digits of your Aadhaar on file. Please
+            Please
             carry the original ID for verification at check-in.
           </p>
         </div>
