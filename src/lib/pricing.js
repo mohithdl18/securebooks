@@ -49,10 +49,11 @@ export function resolvePackage(packageSelection) {
  * ({ packageId, extraAdults, extraChildren }) — never both.
  * @param promo  result of resolvePromo() or null
  */
-export function quoteBooking({ roomSelections = null, packageSelection = null, checkIn, checkOut, addons = {}, promo = null }) {
-  const nightsList = stayNights(checkIn, checkOut);
+export function quoteBooking({ roomSelections = null, packageSelection = null, checkIn, checkOut, addons = {}, promo = null, longWeekendDates = [] }) {
+  const nightsList = stayNights(checkIn, checkOut, 1, longWeekendDates);
   const nights = nightsList.length;
-  const weekendNights = nightsList.filter((n) => n.weekend).length;
+  const longWeekendNights = nightsList.filter((n) => n.longWeekend).length;
+  const weekendNights = nightsList.filter((n) => !n.longWeekend && n.weekend).length;
 
   let staySubtotal = 0;
   let totalOccupants = 0;
@@ -67,7 +68,7 @@ export function quoteBooking({ roomSelections = null, packageSelection = null, c
     if (extraAdults + extraChildren > maxExtras) {
       throw new RequestError(`${pkg.name} allows at most ${pkg.maxGuests} guests.`);
     }
-    const price = packageStayPrice({ packageId: pkg.id, checkIn, checkOut, extraAdults, extraChildren });
+    const price = packageStayPrice({ packageId: pkg.id, checkIn, checkOut, extraAdults, extraChildren, longWeekendDates });
     totalOccupants = pkg.baseGuests + extraAdults + extraChildren;
     staySubtotal = price.total;
     pricedPackage = {
@@ -77,6 +78,7 @@ export function quoteBooking({ roomSelections = null, packageSelection = null, c
       nights,
       weekday_nights: price.weekdayNights,
       weekend_nights: price.weekendNights,
+      long_weekend_nights: price.longWeekendNights,
       price_per_night: pkg.pricePerNight,
       base_guests: pkg.baseGuests,
       max_guests: pkg.maxGuests,
@@ -115,7 +117,7 @@ export function quoteBooking({ roomSelections = null, packageSelection = null, c
       }
       totalOccupants += occupants;
 
-      const price = roomStayPrice({ checkIn, checkOut, extraAdults, extraChildren });
+      const price = roomStayPrice({ checkIn, checkOut, extraAdults, extraChildren, longWeekendDates });
       staySubtotal += price.total;
 
       return {
@@ -126,7 +128,8 @@ export function quoteBooking({ roomSelections = null, packageSelection = null, c
         nights,
         weekday_nights: price.weekdayNights,
         weekend_nights: price.weekendNights,
-        nightly_rate: price.weekendNights ? null : PRICES.roomPerNight.weekday,
+        long_weekend_nights: price.longWeekendNights,
+        nightly_rate: price.weekendNights || price.longWeekendNights ? null : PRICES.roomPerNight.weekday,
         extra_adults: extraAdults,
         chargeable_children: extraChildren,
         amount: price.total,
@@ -154,8 +157,10 @@ export function quoteBooking({ roomSelections = null, packageSelection = null, c
 
   return {
     nights,
-    weekday_nights: nights - weekendNights,
+    weekday_nights: nights - weekendNights - longWeekendNights,
     weekend_nights: weekendNights,
+    long_weekend_nights: longWeekendNights,
+    long_weekend_dates: nightsList.filter((n) => n.longWeekend).map((n) => n.date),
     guests: totalOccupants,
     package: pricedPackage,
     rooms: pricedRooms,
@@ -178,4 +183,22 @@ export function quoteBooking({ roomSelections = null, packageSelection = null, c
     platformFee: totals.platformFee,
     total: totals.total,
   };
+}
+
+export const LONG_WEEKENDS_COLLECTION = "long_weekends";
+
+/**
+ * Nights in [fromDate, toDate) that the admin marked as long weekend.
+ * Stored in the `long_weekends` collection: one document per night,
+ * { _id: "YYYY-MM-DD", date: "YYYY-MM-DD", created_by, created_at }.
+ * Nights switched on before this collection existed (a `long_weekend`
+ * flag on room_availabilty) still count.
+ */
+export async function getLongWeekendDates(db, fromDate, toDate) {
+  const range = { $gte: fromDate, $lt: toDate };
+  const [current, legacy] = await Promise.all([
+    db.collection(LONG_WEEKENDS_COLLECTION).find({ date: range }, { projection: { _id: 0, date: 1 } }).toArray(),
+    db.collection("room_availabilty").find({ date: range, long_weekend: true }, { projection: { _id: 0, date: 1 } }).toArray(),
+  ]);
+  return [...new Set([...current, ...legacy].map((d) => d.date))].sort();
 }

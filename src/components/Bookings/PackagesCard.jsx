@@ -12,6 +12,8 @@ import {
   formatPrice,
 } from "@/logic/price";
 import { isPackageAvailable } from "@/logic/packageAvailability";
+import { useLongWeekendDates } from "@/logic/useLongWeekendDates";
+import { useBookingData } from "@/logic/Data";
 
 /**
  * Whole-villa packages, laid out exactly like RoomsCard.
@@ -24,10 +26,15 @@ export default function PackagesCard({
   selectedPackageIds = [],
   nights = 1,
   availableRoomIds = null,
-  checkIn = "",
-  checkOut = "",
+  checkIn: checkInProp = "",
+  checkOut: checkOutProp = "",
   isBusy = false,
 }) {
+  const booking = useBookingData();
+  const checkIn = checkInProp || booking.CheckIN || "";
+  const checkOut = checkOutProp || booking.CheckOUT || "";
+  const longWeekendDates = useLongWeekendDates(checkIn, checkOut);
+  const hasLongWeekend = longWeekendDates.length > 0;
   const [occupancy, setOccupancy] = useState({});
   const [activePackage, setActivePackage] = useState(null);
 
@@ -43,6 +50,7 @@ export default function PackagesCard({
       nights: stayNights,
       extraAdults: guests.adults,
       extraChildren: guests.children,
+      longWeekendDates,
     });
 
   const withOccupancy = (pkg, guests) => {
@@ -275,7 +283,7 @@ export default function PackagesCard({
                           {label}
                         </p>
                         <p className="mt-1 text-xs text-gray-500">
-                          {weekdayWeekendLabel(rate)} / night
+                          {weekdayWeekendLabel(rate, hasLongWeekend)} / night
                         </p>
                       </div>
 
@@ -333,6 +341,13 @@ export default function PackagesCard({
                     >
                       {formatPrice(stayPrice.total)}
                     </p>
+
+                    {stayPrice.longWeekendNights > 0 && (
+                      <span className="mt-2 inline-flex rounded-full border border-[#e4b441] bg-[#e4b441]/15 px-2.5 py-0.5 text-[11px] font-semibold text-[#052a50]">
+                        Long weekend rate on extra guests · {stayPrice.longWeekendNights}{" "}
+                        {stayPrice.longWeekendNights === 1 ? "night" : "nights"}
+                      </span>
+                    )}
 
                     <p className="mt-1 text-xs leading-5 text-gray-500">
                       {formatPrice(pkg.pricePerNight)} per night for{" "}

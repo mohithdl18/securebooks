@@ -7,11 +7,12 @@ const MEAL_LABEL = { lunch: "Lunch", dinner: "Dinner", lunchDinner: "Lunch + Din
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function nightsText(weekday, weekend, total) {
+function nightsText(weekday, weekend, total, longWeekend = 0) {
   if (weekday == null && weekend == null) return plural(total || 0, "night", "nights");
   const parts = [];
   if (weekday) parts.push(plural(weekday, "weekday night", "weekday nights"));
   if (weekend) parts.push(plural(weekend, "weekend night", "weekend nights"));
+  if (longWeekend) parts.push(plural(longWeekend, "long-weekend night", "long-weekend nights"));
   return parts.join(" + ") || plural(total || 0, "night", "nights");
 }
 
@@ -50,9 +51,9 @@ export function invoiceLines(b, money, sep = " · ") {
       lines.push({
         label: r.roomName,
         sub: [
-          r.nightlyRate && !r.weekendNights
+          r.nightlyRate && !r.weekendNights && !r.longWeekendNights
             ? `${plural(r.nights, "night", "nights")} × ${money(r.nightlyRate)}`
-            : nightsText(r.weekdayNights, r.weekendNights, r.nights),
+            : nightsText(r.weekdayNights, r.weekendNights, r.nights, r.longWeekendNights),
           ...extrasText(r.extraAdults, r.children),
         ].join(sep),
         amount: r.amount,

@@ -8,6 +8,7 @@ import {
   packageStayPrice,
   totalsFromSubtotal,
 } from "@/config/pricing";
+import { useLongWeekendDates } from "@/logic/useLongWeekendDates";
 
 const COLORS = {
   background: "#F7FAEE",
@@ -59,6 +60,8 @@ function nightsSummary(price, extraAdults, extraChildren) {
     parts.push(`${price.weekdayNights} weekday ${price.weekdayNights === 1 ? "night" : "nights"}`);
   if (price.weekendNights)
     parts.push(`${price.weekendNights} weekend ${price.weekendNights === 1 ? "night" : "nights"}`);
+  if (price.longWeekendNights)
+    parts.push(`${price.longWeekendNights} long-weekend ${price.longWeekendNights === 1 ? "night" : "nights"}`);
   const extras = [
     extraAdults ? `+${extraAdults} adult${extraAdults === 1 ? "" : "s"}` : "",
     extraChildren ? `+${extraChildren} child${extraChildren === 1 ? "" : "ren"}` : "",
@@ -97,6 +100,7 @@ export default function Checkout({
   const [paymentError, setPaymentError] = useState(false);
 
   const stayNights = Math.max(1, Number(nights) || 1);
+  const longWeekendDates = useLongWeekendDates(checkIn, checkOut);
 
   // Everyone staying: 2 per room + extras, or the package's guests.
   const guestCount =
@@ -131,7 +135,7 @@ export default function Checkout({
       rooms.map((room) => {
         const extraAdults = Math.max(0, Math.floor(Number(room.extraAdults) || 0));
         const extraChildren = Math.max(0, Math.floor(Number(room.extraChildren) || 0));
-        const price = roomStayPrice({ checkIn, checkOut, nights: stayNights, extraAdults, extraChildren });
+        const price = roomStayPrice({ checkIn, checkOut, nights: stayNights, extraAdults, extraChildren, longWeekendDates });
         return {
           id: room.id,
           name: getRoomName(room),
@@ -139,7 +143,7 @@ export default function Checkout({
           total: price.total,
         };
       }),
-    [rooms, stayNights, checkIn, checkOut]
+    [rooms, stayNights, checkIn, checkOut, longWeekendDates]
   );
 
   const packageLines = useMemo(
@@ -154,6 +158,7 @@ export default function Checkout({
           nights: stayNights,
           extraAdults,
           extraChildren,
+          longWeekendDates,
         });
         return {
           id: pkg.id,
@@ -164,7 +169,7 @@ export default function Checkout({
           total: price ? price.total : 0,
         };
       }),
-    [packages, stayNights, checkIn, checkOut]
+    [packages, stayNights, checkIn, checkOut, longWeekendDates]
   );
 
   const roomSubtotal = roomLines.reduce(

@@ -56,6 +56,7 @@ export function toDetails(b, paymentOrder = null) {
       nights: r.nights,
       weekdayNights: r.weekday_nights ?? null,
       weekendNights: r.weekend_nights ?? null,
+      longWeekendNights: r.long_weekend_nights ?? 0,
       nightlyRate: r.nightly_rate ?? null,
       extraAdults: r.extra_adults || 0,
       children: r.chargeable_children || 0,

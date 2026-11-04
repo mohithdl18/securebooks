@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ALL_PACKAGES } from "@/logic/packageAvailability";
+import { useLongWeekendDates } from "@/logic/useLongWeekendDates";
 import {
   PRICING,
   roomStayPrice,
@@ -182,6 +183,7 @@ export default function Cart({
   checkOut: providedCheckOut = "",
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const longWeekendDates = useLongWeekendDates(providedCheckIn, providedCheckOut);
   const [step, setStep] = useState("cart");
 
   const [addons, setAddons] = useState({
@@ -773,6 +775,7 @@ export default function Cart({
                     nights: stayNights,
                     extraAdults,
                     extraChildren,
+                    longWeekendDates,
                   });
                   const roomTotal = stayPrice.total;
 
@@ -797,10 +800,10 @@ export default function Cart({
                           </p>
 
                           <p className="mt-2 text-xs leading-5 text-[#052a50]/65">
-                            Base rate: {weekdayWeekendLabel(PRICING.accommodation)} / night
+                            Base rate: {weekdayWeekendLabel(PRICING.accommodation, longWeekendDates.length > 0)} / night
                           </p>
 
-                          {stayPrice.weekendNights > 0 && (
+                          {(stayPrice.weekendNights > 0 || stayPrice.longWeekendNights > 0) && (
                             <p className="text-xs leading-5 text-[#052a50]/65">
                               {nightsBreakdown(stayPrice)}
                             </p>
@@ -810,7 +813,7 @@ export default function Cart({
                             <p className="text-xs leading-5 text-[#052a50]/65">
                               {extraAdults} extra{" "}
                               {extraAdults === 1 ? "adult" : "adults"} ×{" "}
-                              {weekdayWeekendLabel(PRICING.extraGuests.adult)} / night
+                              {weekdayWeekendLabel(PRICING.extraGuests.adult, longWeekendDates.length > 0)} / night
                             </p>
                           )}
 
@@ -818,7 +821,7 @@ export default function Cart({
                             <p className="text-xs leading-5 text-[#052a50]/65">
                               {extraChildren}{" "}
                               {extraChildren === 1 ? "child" : "children"} ×{" "}
-                              {weekdayWeekendLabel(PRICING.extraGuests.child)} / night
+                              {weekdayWeekendLabel(PRICING.extraGuests.child, longWeekendDates.length > 0)} / night
                             </p>
                           )}
 
@@ -845,6 +848,7 @@ export default function Cart({
                     nights: stayNights,
                     extraAdults,
                     extraChildren,
+                    longWeekendDates,
                   });
 
                   return (
@@ -881,7 +885,7 @@ export default function Cart({
                             <p className="text-xs leading-5 text-[#052a50]/65">
                               {extraAdults} extra{" "}
                               {extraAdults === 1 ? "adult" : "adults"} ×{" "}
-                              {weekdayWeekendLabel(PRICING.extraGuests.adult)} / night
+                              {weekdayWeekendLabel(PRICING.extraGuests.adult, longWeekendDates.length > 0)} / night
                             </p>
                           )}
 
@@ -889,7 +893,7 @@ export default function Cart({
                             <p className="text-xs leading-5 text-[#052a50]/65">
                               {extraChildren}{" "}
                               {extraChildren === 1 ? "child" : "children"} ×{" "}
-                              {weekdayWeekendLabel(PRICING.extraGuests.child)} / night
+                              {weekdayWeekendLabel(PRICING.extraGuests.child, longWeekendDates.length > 0)} / night
                             </p>
                           )}
 

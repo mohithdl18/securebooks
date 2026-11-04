@@ -8,6 +8,7 @@ import PackagesCard from "@/components/Bookings/PackagesCard";
 import Cart from "@/components/Bookings/Cart";
 import OffersButton from "@/components/Bookings/OffersButton";
 import { ALL_PACKAGES } from "@/logic/packageAvailability";
+import { useLongWeekendDates } from "@/logic/useLongWeekendDates";
 import {
   initializeTempID,
   updateBookingDates,
@@ -53,6 +54,7 @@ export default function BookingsPage() {
   });
 
   const [view, setView] = useState("rooms");
+  const longWeekendDates = useLongWeekendDates(dates.checkIn, dates.checkOut);
   const [selectedRoomIds, setSelectedRoomIds] = useState([]);
   const [selectedRoomData, setSelectedRoomData] = useState([]);
   const [selectedPackageIds, setSelectedPackageIds] = useState([]);
@@ -61,6 +63,9 @@ export default function BookingsPage() {
   const [isHoldingPackage, setIsHoldingPackage] = useState(false);
 
   const [availableRoomIds, setAvailableRoomIds] = useState(null);
+  // Nights in the chosen stay that the resort marked as long weekend
+  // (fetched directly from the server — same lookup the payment uses).
+  const [, setLongWeekendDates] = useState([]);
   const [isCheckingAvailability, setIsCheckingAvailability] =
     useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
@@ -144,6 +149,52 @@ export default function BookingsPage() {
     }
   }, []);
 
+  // Re-check pricing nights when the guest comes back to the tab, so a
+  // long weekend switched on in the admin shows without a manual search.
+  // Runs quietly: no loading state, selections and holds are untouched.
+  useEffect(() => {
+    let lastRun = 0;
+
+    async function refreshPricingNights() {
+      const { checkIn, checkOut } = datesRef.current;
+      if (!checkIn || !checkOut || document.visibilityState !== "visible") return;
+      if (Date.now() - lastRun < 5000) return;
+      lastRun = Date.now();
+
+      const requestId = requestIdRef.current;
+      try {
+        const response = await fetch("/api/availability", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checkIn, checkOut, TempID: tempIDRef.current || "" }),
+        });
+        const result = await response.json().catch(() => ({}));
+        // Ignore if the dates changed or a full search started meanwhile.
+        if (
+          !response.ok ||
+          !result.success ||
+          requestId !== requestIdRef.current ||
+          datesRef.current.checkIn !== checkIn ||
+          datesRef.current.checkOut !== checkOut ||
+          !isMountedRef.current
+        ) {
+          return;
+        }
+        setLongWeekendDates(Array.isArray(result.longWeekendDates) ? result.longWeekendDates : []);
+        if (Array.isArray(result.availableRoomIds)) setAvailableRoomIds(result.availableRoomIds);
+      } catch {
+        // Next full search will catch up.
+      }
+    }
+
+    window.addEventListener("focus", refreshPricingNights);
+    document.addEventListener("visibilitychange", refreshPricingNights);
+    return () => {
+      window.removeEventListener("focus", refreshPricingNights);
+      document.removeEventListener("visibilitychange", refreshPricingNights);
+    };
+  }, []);
+
   // Keep the toolbar's existing sticky behavior.
   useEffect(() => {
     function handleScroll() {
@@ -200,9 +251,10 @@ export default function BookingsPage() {
 
       updateBookingDates(checkIn, checkOut);
 
+      // Packages need the same availability + pricing check as rooms
+      // (it used to return early here, leaving prices out of date).
       if (mode === "packages") {
         setView("packages");
-        return;
       }
 
       const requestId = ++requestIdRef.current;
@@ -211,6 +263,7 @@ export default function BookingsPage() {
       setAvailabilityError("");
       setHoldError("");
       setAvailableRoomIds(null);
+      setLongWeekendDates([]);
 
       // Changing dates invalidates selected rooms and packages.
       if (datesChanged) {
@@ -246,6 +299,10 @@ export default function BookingsPage() {
           );
         }
 
+        setLongWeekendDates(
+          Array.isArray(result.longWeekendDates) ? result.longWeekendDates : []
+        );
+
         setAvailableRoomIds(
           Array.isArray(result.availableRoomIds)
             ? result.availableRoomIds
@@ -268,6 +325,30 @@ export default function BookingsPage() {
     },
     [releaseTemporaryHolds]
   );
+
+  // On first load, check the same stay the toolbar already shows
+  // (tonight → tomorrow). Before this, room cards had no dates and always
+  // showed the plain weekday price, ignoring weekend / long-weekend rates.
+  const autoSearchedRef = useRef(false);
+  useEffect(() => {
+    if (autoSearchedRef.current || datesRef.current.checkIn) return;
+    autoSearchedRef.current = true;
+
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Deferred so it runs after mount, outside the effect body.
+    const timer = setTimeout(() => {
+      handleAvailabilitySearch({
+        checkIn: formatLocalDate(today),
+        checkOut: formatLocalDate(tomorrow),
+        mode: "rooms",
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [handleAvailabilitySearch]);
+
 
   // Load today's and tomorrow's availability on the first visit.
   useEffect(() => {
@@ -804,6 +885,16 @@ export default function BookingsPage() {
                       {nights === 1 ? "night" : "nights"}
                     </p>
                   )}
+                  {dates.checkIn && dates.checkOut && longWeekendDates.length > 0 && (
+                    <p className="mt-2 inline-flex rounded-full border border-[#e4b441] bg-[#e4b441]/15 px-3 py-1 text-xs font-semibold">
+                      Long weekend rates apply on{" "}
+                      {longWeekendDates
+                        .map((d) =>
+                          new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+                        )
+                        .join(", ")}
+                    </p>
+                  )}
                 </div>
 
                 {selectedRoomIds.length > 0 && (
@@ -917,6 +1008,17 @@ export default function BookingsPage() {
                   <p className="mt-2 text-sm opacity-75">
                     {dates.checkIn} to {dates.checkOut} · {nights}{" "}
                     {nights === 1 ? "night" : "nights"}
+                  </p>
+                )}
+
+                {dates.checkIn && dates.checkOut && longWeekendDates.length > 0 && (
+                  <p className="mt-2 inline-flex rounded-full border border-[#e4b441] bg-[#e4b441]/15 px-3 py-1 text-xs font-semibold">
+                    Long weekend rates apply on{" "}
+                    {longWeekendDates
+                      .map((d) =>
+                        new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+                      )
+                      .join(", ")}
                   </p>
                 )}
 

@@ -192,11 +192,18 @@ export async function POST(request) {
       .filter((room) => !availableRoomIds.includes(room.id))
       .map((room) => room.id);
 
+    // Nights the admin marked as long weekend (priced higher).
+    const longWeekendDates = availabilityRecords
+      .filter((r) => r.long_weekend === true && r.date >= checkIn && r.date < checkOut)
+      .map((r) => r.date)
+      .sort();
+
     return NextResponse.json({
       success: true,
       checkIn,
       checkOut,
       nights,
+      longWeekendDates,
       availableRoomIds,
       availableRooms,
       unavailableRoomIds,

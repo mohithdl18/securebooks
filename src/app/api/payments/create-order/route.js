@@ -14,7 +14,7 @@ import {
   RequestError,
 } from "@/lib/security";
 import { validateStay, validateCustomerDetails } from "@/lib/validation";
-import { quoteBooking, resolvePackage } from "@/lib/pricing";
+import { quoteBooking, resolvePackage, getLongWeekendDates } from "@/lib/pricing";
 import { resolvePromo } from "@/lib/promos";
 import { razorpayConfigured, razorpayRequest, publicKeyId } from "@/lib/razorpay";
 
@@ -95,10 +95,12 @@ export async function POST(request) {
     }
 
     // Price is computed ONLY here, from server-side tables.
-    const preQuote = quoteBooking({ roomSelections, packageSelection, checkIn, checkOut, addons });
+    // Long-weekend nights come from the database, never from the browser.
+    const longWeekendDates = await getLongWeekendDates(db, checkIn, checkOut);
+    const preQuote = quoteBooking({ roomSelections, packageSelection, checkIn, checkOut, addons, longWeekendDates });
     const promo = await resolvePromo(db, promoCode, { subtotal: preQuote.subtotal, customer });
     const quote = promo
-      ? quoteBooking({ roomSelections, packageSelection, checkIn, checkOut, addons, promo })
+      ? quoteBooking({ roomSelections, packageSelection, checkIn, checkOut, addons, promo, longWeekendDates })
       : preQuote;
 
     // The guest must be charged exactly what the site showed them.

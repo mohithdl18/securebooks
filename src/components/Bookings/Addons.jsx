@@ -174,8 +174,40 @@ export default function Addons({
     );
   }
 
+  // Same Clear button as the cart: resets meals and driver add-ons.
+  const selectedAddonCount =
+    (addons.mealPlan ? 1 : 0) +
+    (driverCount > 0 ? 1 : 0) +
+    (driverCount > 0 && addons.driverMealPlan ? 1 : 0);
+
+  function handleClearAddons() {
+    onChange?.({
+      ...addons,
+      mealPlan: "",
+      mealGuests: defaultMealGuests,
+      drivers: 0,
+      driverMealPlan: "",
+    });
+  }
+
   return (
     <div className="space-y-7">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-[#052a50]/65">
+          {selectedAddonCount}{" "}
+          {selectedAddonCount === 1 ? "add-on" : "add-ons"} selected
+        </p>
+
+        <button
+          type="button"
+          onClick={handleClearAddons}
+          disabled={selectedAddonCount === 0}
+          className="rounded-full border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Clear
+        </button>
+      </div>
+
       {/* Meals section */}
       <section>
         <div className="mb-4">

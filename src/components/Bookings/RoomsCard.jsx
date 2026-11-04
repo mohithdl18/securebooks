@@ -13,7 +13,8 @@ import {
   weekdayWeekendLabel,
   formatPrice,
 } from "@/logic/price";
-import { updateBookingRooms } from "@/logic/Data";
+import { updateBookingRooms, useBookingData } from "@/logic/Data";
+import { useLongWeekendDates } from "@/logic/useLongWeekendDates";
 
 export default function RoomsCard({
   onSelectRoom,
@@ -21,9 +22,19 @@ export default function RoomsCard({
   selectedRoomIds = [],
   nights = 1,
   availableRoomIds = null,
-  checkIn = "",
-  checkOut = "",
+  checkIn: checkInProp = "",
+  checkOut: checkOutProp = "",
 }) {
+  // Stay dates: from the page, or else from the shared booking record
+  // (updated whenever dates are searched), so prices always follow the
+  // dates on screen.
+  const booking = useBookingData();
+  const checkIn = checkInProp || booking.CheckIN || "";
+  const checkOut = checkOutProp || booking.CheckOUT || "";
+
+  // Admin-set long-weekend nights, fetched from the long_weekends collection.
+  const longWeekendDates = useLongWeekendDates(checkIn, checkOut);
+  const hasLongWeekend = longWeekendDates.length > 0;
   const [occupancy, setOccupancy] = useState({});
   const [activeRoom, setActiveRoom] = useState(null);
 
@@ -53,6 +64,7 @@ export default function RoomsCard({
           nights: stayNights,
           extraAdults: guests.adults,
           chargeableChildren: guests.children,
+          longWeekendDates,
         });
 
         return {
@@ -68,7 +80,7 @@ export default function RoomsCard({
       .filter(Boolean);
 
     updateBookingRooms(selectedRooms);
-  }, [selectedRoomIds, occupancy, nights, checkIn, checkOut]);
+  }, [selectedRoomIds, occupancy, nights, checkIn, checkOut, longWeekendDates]);
 
   const updateOccupancy = (roomId, type, change) => {
     // Do not allow occupancy changes for sold-out rooms.
@@ -112,6 +124,7 @@ export default function RoomsCard({
       nights: stayNights,
       extraAdults: updatedGuests.adults,
       chargeableChildren: updatedGuests.children,
+      longWeekendDates,
     });
 
     if (selectedRoomIds.includes(roomId)) {
@@ -149,6 +162,7 @@ export default function RoomsCard({
             nights: stayNights,
             extraAdults: guests.adults,
             extraChildren: guests.children,
+            longWeekendDates,
           });
           const totalPrice = stayPrice.total;
 
@@ -339,7 +353,7 @@ export default function RoomsCard({
                       </p>
 
                       <p className="mt-1 text-xs text-gray-500">
-                        {weekdayWeekendLabel(PRICING.extraGuests.adult)} / night
+                        {weekdayWeekendLabel(PRICING.extraGuests.adult, hasLongWeekend)} / night
                       </p>
                     </div>
 
@@ -390,7 +404,7 @@ export default function RoomsCard({
                       </p>
 
                       <p className="mt-1 text-xs text-gray-500">
-                        {weekdayWeekendLabel(PRICING.extraGuests.child)} / night
+                        {weekdayWeekendLabel(PRICING.extraGuests.child, hasLongWeekend)} / night
                       </p>
                     </div>
 
@@ -456,8 +470,15 @@ export default function RoomsCard({
                       {formatPrice(totalPrice)}
                     </p>
 
+                    {stayPrice.longWeekendNights > 0 && (
+                      <span className="mt-2 inline-flex rounded-full border border-[#e4b441] bg-[#e4b441]/15 px-2.5 py-0.5 text-[11px] font-semibold text-[#052a50]">
+                        Long weekend rate · {stayPrice.longWeekendNights}{" "}
+                        {stayPrice.longWeekendNights === 1 ? "night" : "nights"}
+                      </span>
+                    )}
+
                     <p className="mt-1 text-xs leading-5 text-gray-500">
-                      {weekdayWeekendLabel(PRICING.accommodation)} per
+                      {weekdayWeekendLabel(PRICING.accommodation, hasLongWeekend)} per
                       night (weekends are Fri–Sun nights).
                       {checkIn && checkOut
                         ? ` Your stay: ${nightsBreakdown(stayPrice)}`

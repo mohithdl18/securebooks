@@ -38,6 +38,9 @@ export default function AdminDashboardPage() {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [notice, setNotice] = useState("");
   const [offersOpen, setOffersOpen] = useState(false);
+  const [longWeekends, setLongWeekends] = useState([]);
+  const [longWeekendBusy, setLongWeekendBusy] = useState(false);
+  const [longWeekendError, setLongWeekendError] = useState("");
   const roomsRequest = useRef(0);
 
   const logout = useCallback(async () => {
@@ -87,9 +90,42 @@ export default function AdminDashboardPage() {
       .catch((e) => setBookingsState((prev) => ({ ...prev, page: forPage, error: e.message })));
   }, []);
 
+  // Long-weekend nights from a month back to a year ahead (calendar dots).
+  const loadLongWeekends = useCallback((base) => {
+    const d = new Date(`${base}T00:00:00Z`);
+    const from = new Date(d); from.setUTCDate(from.getUTCDate() - 31);
+    const to = new Date(d); to.setUTCDate(to.getUTCDate() + 400);
+    const iso = (x) => x.toISOString().slice(0, 10);
+    adminFetch(`/api/admin/long-weekends?from=${iso(from)}&to=${iso(to)}`)
+      .then((r) => setLongWeekends(r.dates || []))
+      .catch(() => {});
+  }, []);
+
+  async function toggleLongWeekend(forDate, enable) {
+    setLongWeekendBusy(true);
+    setLongWeekendError("");
+    try {
+      await adminFetch("/api/admin/long-weekends", {
+        method: enable ? "POST" : "DELETE",
+        body: { date: forDate },
+      });
+      setLongWeekends((prev) =>
+        enable ? [...new Set([...prev, forDate])].sort() : prev.filter((d) => d !== forDate)
+      );
+    } catch (e) {
+      setLongWeekendError(e.message);
+    } finally {
+      setLongWeekendBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (session) loadStats();
   }, [session, loadStats]);
+
+  useEffect(() => {
+    if (session && today) loadLongWeekends(today);
+  }, [session, today, loadLongWeekends]);
 
   useEffect(() => {
     if (session && date) loadRooms(date);
@@ -157,7 +193,18 @@ export default function AdminDashboardPage() {
 
         {/* Calendar + rooms */}
         <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(300px,380px)_1fr]">
-          <AdminCalendar value={date} today={today} onChange={setDate} />
+          <AdminCalendar
+            value={date}
+            today={today}
+            onChange={(d) => {
+              setDate(d);
+              setLongWeekendError("");
+            }}
+            longWeekendDates={longWeekends}
+            onToggleLongWeekend={toggleLongWeekend}
+            longWeekendBusy={longWeekendBusy}
+            longWeekendError={longWeekendError}
+          />
           <RoomStatusGrid
             date={date}
             rooms={roomsState.rooms}

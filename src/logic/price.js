@@ -45,6 +45,7 @@ export function calculateRoomPrice({
   nights = 1,
   extraAdults = 0,
   chargeableChildren = 0,
+  longWeekendDates = [],
 } = {}) {
   return roomStayPrice({
     checkIn,
@@ -52,6 +53,7 @@ export function calculateRoomPrice({
     nights,
     extraAdults,
     extraChildren: chargeableChildren,
+    longWeekendDates,
   }).total;
 }
 
@@ -63,12 +65,20 @@ export function nightsBreakdown(price) {
     parts.push(`${price.weekdayNights} weekday ${price.weekdayNights === 1 ? "night" : "nights"}`);
   if (price.weekendNights)
     parts.push(`${price.weekendNights} weekend ${price.weekendNights === 1 ? "night" : "nights"}`);
+  if (price.longWeekendNights)
+    parts.push(`${price.longWeekendNights} long-weekend ${price.longWeekendNights === 1 ? "night" : "nights"}`);
   return parts.join(" + ");
 }
 
-/** "₹4,000 weekdays · ₹4,500 weekends" */
-export function weekdayWeekendLabel(rate) {
-  return `${formatPrice(rate.weekday)} weekdays · ${formatPrice(rate.weekend)} weekends`;
+/**
+ * "₹4,000 weekdays · ₹4,500 weekends", plus the long-weekend rate when
+ * the guest's stay includes a long-weekend night.
+ */
+export function weekdayWeekendLabel(rate, includeLongWeekend = false) {
+  const base = `${formatPrice(rate.weekday)} weekdays · ${formatPrice(rate.weekend)} weekends`;
+  return includeLongWeekend && rate.longWeekend
+    ? `${base} · ${formatPrice(rate.longWeekend)} long weekends`
+    : base;
 }
 
 /**

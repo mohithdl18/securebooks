@@ -141,6 +141,7 @@ const collectionDefinitions = [
   { name: "webhook_events" },
   { name: "admin_sessions" },
   { name: "admin_audit" },
+  { name: "long_weekends" },
 ];
 
 // Indexes that enforce correctness at the database level.
@@ -167,6 +168,7 @@ const indexDefinitions = [
   ["bookings_data", { created_at: -1 }, {}],
   ["bookings_data", { status: 1, check_in: 1, check_out: 1 }, {}],
   ["room_nights", { booking_id: 1 }, {}],
+  ["long_weekends", { date: 1 }, { unique: true }],
 ];
 
 // Create missing collections only.
